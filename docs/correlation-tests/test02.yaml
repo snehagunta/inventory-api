@@ -1,0 +1,38 @@
+---
+- type: dbBootstrap
+  tables:
+    resources: []
+    inventory_resources: []
+- type: apiRequest
+  requests:
+    - request: POST
+      data:
+        resource:
+          resource_type: k8s_cluster
+          reporter_data:
+            reporter_type: ACM
+            reporter_instance_id: "1"
+            local_resource_id: "1"
+          common_resource_data:
+            workspace_id: "1"
+    - request: POST
+      data:
+        resource:
+          inventory_id: "{{ inventory_resources.0.id }}"
+          resource_type: k8s_cluster
+          reporter_data:
+            reporter_type: ACS
+            reporter_instance_id: "1"
+            local_resource_id: "100"
+          common_resource_data:
+            workspace_id: "1"
+- type: assertDbState
+  countRows:
+    resources: 2
+    inventory_resources: 1
+  tables:
+    resources:
+      "0":
+        inventory_id: "{{ inventory_resources.0.id }}"
+      "1":
+        inventory_id: "{{ inventory_resources.0.id }}"
