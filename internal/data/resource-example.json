@@ -1,0 +1,50 @@
+{
+  "id": "41d2ecaa-f745-48b5-b4e5-42dee2f730a7",
+  "resourceType": "k8s_cluster",
+  "commonRepresentation": {
+    "workspaceId": "76aa51e4-4757-4809-89c5-e5561db25527"
+  },
+  "reporterRepresentations": [
+    {
+      "metadata": {
+        "localResourceId": "ae5c7a82-cb3b-4591-9b10-3ae1506d4f3d",
+        "apiHref": "https://apiHrefACMSpecific.com/",
+        "consoleHref": "https://www.consoleACMSpecific.com/",
+        "reporterVersion": "0.2.0"
+      },
+      "reporterType": "ACM",
+      "reporterInstanceId": "14c6b63e-49b2-4cc2-99de-5d914b657548",
+      "reporterAttributes": {
+        "external_cluster_id": "9414df93-aefe-4153-ba8a-8765373d39b9",
+        "cluster_status": "READY",
+        "cluster_reason": "reflect",
+        "kube_version": "2.7.0",
+        "kube_vendor": "KUBE_VENDOR_UNSPECIFIED",
+        "vendor_version": "3.3.1",
+        "cloud_platform": "BAREMETAL_IPI",
+        "nodes": [
+          {
+            "name": "www.example.com",
+            "cpu": "7500m",
+            "memory": "30973224Ki"
+          }
+        ]
+      }
+    },
+    {
+      "metadata": {
+        "localResourceId": "0f215fbc-610d-420c-bd9e-1f5a21d355a0",
+        "apiHref": "https://apiHrefACSSpecific.com/",
+        "consoleHref": "https://www.consoleACSSpecific.com/",
+        "reporterVersion": "0.8.0"
+      },
+      "reporterType": "ACS",
+      "reporterInstanceId": "56710da6-7779-4472-a4d8-057c199660d4",
+      "reporterAttributes": {
+        "external_cluster_id": "9414df93-aefe-4153-ba8a-8765373d39b9",
+        "cluster_status": "READY",
+        "cluster_reason": "restart"
+      }
+    }
+  ]
+}
