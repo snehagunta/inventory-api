@@ -4,16 +4,17 @@
   "commonRepresentation": {
     "workspaceId": "76aa51e4-4757-4809-89c5-e5561db25527"
   },
+  "correlationKeys": [{}],
   "reporterRepresentations": [
     {
       "metadata": {
         "localResourceId": "ae5c7a82-cb3b-4591-9b10-3ae1506d4f3d",
         "apiHref": "https://apiHrefACMSpecific.com/",
         "consoleHref": "https://www.consoleACMSpecific.com/",
-        "reporterVersion": "0.2.0"
+        "reporterVersion": "0.2.0",
+        "reporterInstanceId": "14c6b63e-49b2-4cc2-99de-5d914b657548",
+        "reporterType": "ACM"
       },
-      "reporterType": "ACM",
-      "reporterInstanceId": "14c6b63e-49b2-4cc2-99de-5d914b657548",
       "reporterAttributes": {
         "external_cluster_id": "9414df93-aefe-4153-ba8a-8765373d39b9",
         "cluster_status": "READY",
