@@ -96,9 +96,10 @@ build-push-minimal:
 	./build_push_minimal.sh
 
 .PHONY: clean
-# removes all binaries
+# removes all binaries and any leftover tar packages from Kind build
 clean:
-	rm -rf bin/
+	rm -rf bin/ inventory-api.tar inventory-e2e-tests.tar kafka-connect.tar
+
 
 .PHONY: test
 # run all tests
@@ -106,9 +107,9 @@ test:
 	@echo ""
 	@echo "Running tests."
 	# TODO: e2e tests are taking too long to be enabled by default. They need to be sped up.
-	@$(GO) test ./... -count=1 -coverprofile=coverage.out -skip 'TestInventoryAPIGRPC_*|TestInventoryAPIHTTP_*|Test_ACMKafkaConsumer'
+	@$(GO) test ./... -count=1 -race -covermode=atomic -coverprofile=coverage.txt -skip 'TestInventoryAPIGRPC_*|TestInventoryAPIHTTP_*|Test_ACMKafkaConsumer'
 	@echo "Overall test coverage:"
-	@$(GO) tool cover -func=coverage.out | grep total: | awk '{print $$3}'
+	@$(GO) tool cover -func=coverage.txt | grep total: | awk '{print $$3}'
 
 .PHONY: check-e2e-tests
 # check result of kind e2e tests
@@ -116,7 +117,7 @@ check-e2e-tests:
 	./scripts/check-e2e-tests.sh
 
 test-coverage: test
-	@$(GO) tool cover -html=coverage.out -o coverage.html
+	@$(GO) tool cover -html=coverage.txt -o coverage.html
 	@echo "coverage report written to coverage.html"
 
 
@@ -157,6 +158,10 @@ inventory-up:
 inventory-up-relations-ready:
 	./scripts/start-inventory.sh full-setup-relations-ready 8081 9081
 
+.PHONY: inventory-up-w-monitoring
+inventory-up-w-monitoring:
+	./scripts/start-inventory.sh full-kessel-w-monitoring 8081 9081
+
 .PHONY: inventory-up-split
 inventory-up-split:
 	./scripts/start-inventory.sh split-setup 8000 9000
@@ -184,6 +189,10 @@ inventory-down:
 .PHONY: inventory-down-kind
 inventory-down-kind:
 	./scripts/stop-inventory-kind.sh
+
+.PHONY: update-local-dashboards
+update-local-dashboards:
+	./scripts/update-local-dashboards.sh
 
 .PHONY: run
 # run api locally

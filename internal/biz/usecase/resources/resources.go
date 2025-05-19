@@ -9,8 +9,9 @@ import (
 
 	"sync"
 
-	"github.com/project-kessel/inventory-api/internal/consumer"
+	"github.com/project-kessel/inventory-api/api/kessel/inventory/v1beta2"
 	"github.com/project-kessel/inventory-api/internal/pubsub"
+	"github.com/sony/gobreaker"
 
 	"github.com/google/uuid"
 
@@ -52,45 +53,51 @@ var (
 
 const listenTimeout = 10 * time.Second
 
+// Flags that control the behavior of the usecase operations
+// and should be the same between all handlers
+type UsecaseConfig struct {
+	DisablePersistence      bool
+	ReadAfterWriteEnabled   bool
+	ReadAfterWriteAllowlist []string
+	ConsumerEnabled         bool
+}
+
 type Usecase struct {
 	reporterResourceRepository  ReporterResourceRepository
 	inventoryResourceRepository InventoryResourceRepository
+	waitForNotifBreaker         *gobreaker.CircuitBreaker
 	Authz                       authzapi.Authorizer
 	Eventer                     eventingapi.Manager
-	Consumer                    consumer.InventoryConsumer
 	Namespace                   string
 	log                         *log.Helper
 	Server                      server.Server
-	DisablePersistence          bool
 	ListenManager               pubsub.ListenManagerImpl
-	ReadAfterWriteEnabled       bool
-	ReadAfterWriteAllowlist     []string
+	Config                      *UsecaseConfig
 }
 
 func New(reporterResourceRepository ReporterResourceRepository, inventoryResourceRepository InventoryResourceRepository,
-	authz authzapi.Authorizer, eventer eventingapi.Manager, namespace string, logger log.Logger, disablePersistence bool,
-	listenManager pubsub.ListenManagerImpl, readAfterWriteEnabled bool, readAfterWriteAllowlist []string) *Usecase {
+	authz authzapi.Authorizer, eventer eventingapi.Manager, namespace string, logger log.Logger,
+	listenManager pubsub.ListenManagerImpl, waitForNotifBreaker *gobreaker.CircuitBreaker, usecaseConfig *UsecaseConfig) *Usecase {
 	return &Usecase{
 		reporterResourceRepository:  reporterResourceRepository,
 		inventoryResourceRepository: inventoryResourceRepository,
+		waitForNotifBreaker:         waitForNotifBreaker,
 		Authz:                       authz,
 		Eventer:                     eventer,
 		Namespace:                   namespace,
 		log:                         log.NewHelper(logger),
-		DisablePersistence:          disablePersistence,
 		ListenManager:               listenManager,
-		ReadAfterWriteEnabled:       readAfterWriteEnabled,
-		ReadAfterWriteAllowlist:     readAfterWriteAllowlist,
+		Config:                      usecaseConfig,
 	}
 }
 
-func (uc *Usecase) Upsert(ctx context.Context, m *model.Resource, wait_for_sync bool) (*model.Resource, error) {
+func (uc *Usecase) Upsert(ctx context.Context, m *model.Resource, write_visibility v1beta2.WriteVisibility) (*model.Resource, error) {
 	log.Info("upserting resource: ", m)
 	ret := m // Default to returning the input model in case persistence is disabled
 	var subscription pubsub.Subscription
 	var txidStr string
 
-	if !uc.DisablePersistence {
+	if !uc.Config.DisablePersistence {
 		// check if the resource already exists
 		existingResource, err := uc.reporterResourceRepository.FindByReporterResourceIdv1beta2(ctx, model.ReporterResourceIdv1beta2FromResource(m))
 
@@ -98,8 +105,8 @@ func (uc *Usecase) Upsert(ctx context.Context, m *model.Resource, wait_for_sync 
 			return nil, ErrDatabaseError
 		}
 
-		readAfterWriteEnabled := computeReadAfterWrite(uc, wait_for_sync, m)
-		if readAfterWriteEnabled {
+		readAfterWriteEnabled := computeReadAfterWrite(uc, write_visibility, m)
+		if readAfterWriteEnabled && uc.Config.ConsumerEnabled {
 			// Generate txid for data layer
 			// TODO: Replace this when inventory api has proper api-level transaction ids
 			txid, err := uuid.NewV7()
@@ -130,13 +137,33 @@ func (uc *Usecase) Upsert(ctx context.Context, m *model.Resource, wait_for_sync 
 			return ret, err2
 		}
 
-		if readAfterWriteEnabled {
+		if readAfterWriteEnabled && uc.Config.ConsumerEnabled {
 			timeoutCtx, cancel := context.WithTimeout(ctx, listenTimeout)
 			defer cancel()
 
-			err = subscription.BlockForNotification(timeoutCtx)
+			_, err := uc.waitForNotifBreaker.Execute(func() (interface{}, error) {
+				err = subscription.BlockForNotification(timeoutCtx)
+				if err != nil {
+					// Return error for circuit breaker
+					return nil, err
+				}
+				return nil, nil
+			})
+
 			if err != nil {
-				return nil, err
+				switch {
+				case errors.Is(err, pubsub.ErrWaitContextCancelled):
+					uc.log.WithContext(ctx).Debugf("Reached timeout waiting for notification from consumer")
+					return ret, nil
+				case errors.Is(err, gobreaker.ErrOpenState):
+					uc.log.WithContext(ctx).Debugf("Circuit breaker is open, skipped waiting for notification from consumer")
+					return ret, nil
+				case errors.Is(err, gobreaker.ErrTooManyRequests):
+					uc.log.WithContext(ctx).Debugf("Circuit breaker is half-open, skipped waiting for notification from consumer")
+					return ret, nil
+				default:
+					return nil, err
+				}
 			}
 		}
 	}
@@ -315,7 +342,7 @@ func (uc *Usecase) Create(ctx context.Context, m *model.Resource) (*model.Resour
 	var subscription pubsub.Subscription
 	var txidStr string
 
-	if !uc.DisablePersistence {
+	if !uc.Config.DisablePersistence {
 		// check if the resource already exists
 		existingResource, err := uc.reporterResourceRepository.FindByReporterData(ctx, m.ReporterId, m.ReporterResourceId)
 		if err != nil && errors.Is(err, gorm.ErrRecordNotFound) {
@@ -331,7 +358,7 @@ func (uc *Usecase) Create(ctx context.Context, m *model.Resource) (*model.Resour
 			return nil, ErrResourceAlreadyExists
 		}
 
-		if !common.IsNil(uc.ListenManager) {
+		if !common.IsNil(uc.ListenManager) && uc.Config.ConsumerEnabled {
 			// Generate txid for data layer
 			// TODO: Replace this when inventory api has proper api-level transaction ids
 			txid, err := uuid.NewV7()
@@ -348,12 +375,15 @@ func (uc *Usecase) Create(ctx context.Context, m *model.Resource) (*model.Resour
 			return nil, err
 		}
 
-		if !common.IsNil(uc.ListenManager) {
+		if !common.IsNil(uc.ListenManager) && uc.Config.ConsumerEnabled {
 			timeoutCtx, cancel := context.WithTimeout(ctx, listenTimeout)
 			defer cancel()
 
 			err = subscription.BlockForNotification(timeoutCtx)
 			if err != nil {
+				if errors.Is(err, pubsub.ErrWaitContextCancelled) {
+					return ret, nil
+				}
 				return nil, err
 			}
 		}
@@ -371,7 +401,7 @@ func (uc *Usecase) Update(ctx context.Context, m *model.Resource, id model.Repor
 	var subscription pubsub.Subscription
 	var txidStr string
 
-	if !uc.DisablePersistence {
+	if !uc.Config.DisablePersistence {
 		// check if the resource exists
 		existingResource, err := uc.reporterResourceRepository.FindByReporterData(ctx, m.ReporterId, m.ReporterResourceId)
 		if err != nil && errors.Is(err, gorm.ErrRecordNotFound) {
@@ -387,7 +417,7 @@ func (uc *Usecase) Update(ctx context.Context, m *model.Resource, id model.Repor
 			return nil, ErrDatabaseError
 		}
 
-		if !common.IsNil(uc.ListenManager) {
+		if !common.IsNil(uc.ListenManager) && uc.Config.ConsumerEnabled {
 			// Generate txid for data layer
 			// TODO: Replace this when inventory api has proper api-level transaction ids
 			txid, err := uuid.NewV7()
@@ -404,12 +434,15 @@ func (uc *Usecase) Update(ctx context.Context, m *model.Resource, id model.Repor
 			return nil, err
 		}
 
-		if !common.IsNil(uc.ListenManager) {
+		if !common.IsNil(uc.ListenManager) && uc.Config.ConsumerEnabled {
 			timeoutCtx, cancel := context.WithTimeout(ctx, listenTimeout)
 			defer cancel()
 
 			err = subscription.BlockForNotification(timeoutCtx)
 			if err != nil {
+				if errors.Is(err, pubsub.ErrWaitContextCancelled) {
+					return ret, nil
+				}
 				return nil, err
 			}
 		}
@@ -424,7 +457,7 @@ func (uc *Usecase) Update(ctx context.Context, m *model.Resource, id model.Repor
 func (uc *Usecase) Delete(ctx context.Context, id model.ReporterResourceId) error {
 	m := &model.Resource{}
 
-	if !uc.DisablePersistence {
+	if !uc.Config.DisablePersistence {
 		// check if the resource exists
 		existingResource, err := uc.reporterResourceRepository.FindByReporterData(ctx, id.ReporterId, id.LocalResourceId)
 
@@ -464,9 +497,12 @@ func isSPInAllowlist(m *model.Resource, allowlist []string) bool {
 	return false
 }
 
-func computeReadAfterWrite(uc *Usecase, wait_for_sync bool, m *model.Resource) bool {
+func computeReadAfterWrite(uc *Usecase, write_visibility v1beta2.WriteVisibility, m *model.Resource) bool {
 	// read after write functionality is enabled/disabled globally.
 	// And executed if request specifies and
 	// came from service provider in allowlist
-	return !common.IsNil(uc.ListenManager) && uc.ReadAfterWriteEnabled && wait_for_sync && isSPInAllowlist(m, uc.ReadAfterWriteAllowlist)
+	if write_visibility == v1beta2.WriteVisibility_WRITE_VISIBILITY_UNSPECIFIED || write_visibility == v1beta2.WriteVisibility_MINIMIZE_LATENCY {
+		return false
+	}
+	return !common.IsNil(uc.ListenManager) && uc.Config.ReadAfterWriteEnabled && isSPInAllowlist(m, uc.Config.ReadAfterWriteAllowlist)
 }
