@@ -15,6 +15,7 @@ This repository implements a common inventory system with eventing.
 - [Example Usage](#example-usage)
 - [Configuration](#configuration)
 - [Testing](#testing)
+- [Development Guidelines](#development-guidelines)
 - [Contributing](#contributing)
 
 ## Development Setup
@@ -333,6 +334,86 @@ make test
 ```
 
 For end-to-test info see [here](./test/README.md).
+
+## Development Guidelines
+
+### Database Schema Patterns
+
+When working with database models in this project, please follow these established patterns to ensure consistency and maintainability.
+
+#### GORM Index Naming Convention
+
+All database models should follow a consistent naming pattern for GORM indexes:
+
+**Pattern**: `{model_abbreviation}_unique_idx`
+
+**Examples**:
+- `ReporterRepresentation` → `reporter_rep_unique_idx`
+- `RepresentationReference` → `rep_ref_unique_idx`
+- `CommonRepresentation` → `common_rep_unique_idx`
+
+```go
+// ✅ Correct - follows the established pattern
+type ReporterRepresentation struct {
+    LocalResourceID string `gorm:"index:reporter_rep_unique_idx,unique"`
+    ReporterType    string `gorm:"index:reporter_rep_unique_idx,unique"`
+    // ... other fields
+}
+
+// ❌ Incorrect - doesn't follow the pattern
+type SomeModel struct {
+    Field1 string `gorm:"index:unique_some_idx,unique"`  // Wrong order
+    Field2 string `gorm:"index:some_unique,unique"`      // Missing suffix
+}
+```
+
+#### Index Naming Best Practices
+
+1. **Composite Indexes**: Use the same index name across multiple fields to create composite indexes
+2. **Unique Constraints**: Always include `,unique` for unique composite indexes
+3. **Constants**: Define index names as constants in `internal/biz/model/constants.go`
+4. **Consistency**: Follow the established `{abbreviation}_unique_idx` pattern
+
+```go
+// Define constants for index names
+const (
+    ReporterRepresentationUniqueIndex  = "reporter_rep_unique_idx"
+    RepresentationReferenceUniqueIndex = "rep_ref_unique_idx"
+)
+```
+
+#### Field Size Constraints
+
+Use consistent field size constraints defined in constants:
+
+```go
+const (
+    MaxFieldSize128 = 128 // For most string fields like IDs, types, etc.
+    MaxFieldSize512 = 512 // For URL fields like APIHref, ConsoleHref
+)
+```
+
+#### References
+
+- [GORM Index Documentation](https://gorm.io/docs/indexes.html)
+- [GORM Unique Index Pitfalls](https://ankit.earth/blog/pitfalls-of-gorm-unique-index/)
+
+### Model Validation Patterns
+
+All domain models should follow the factory method pattern for validation:
+
+```go
+// ✅ Use factory methods for creating validated instances
+func NewReporterRepresentation(/* params */) (*ReporterRepresentation, error) {
+    rr := &ReporterRepresentation{/* ... */}
+    if err := validateReporterRepresentation(rr); err != nil {
+        return nil, err
+    }
+    return rr, nil
+}
+```
+
+This ensures immutability and consistent validation across the codebase.
 
 ## Validating FIPS
 

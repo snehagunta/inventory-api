@@ -14,7 +14,7 @@ import (
 type RepresentationReference struct {
 	ResourceID uuid.UUID `gorm:"type:uuid;column:resource_id;index:rep_ref_unique_idx,unique;not null;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 
-	LocalResourceID       string `gorm:"size:128;column:local_resource_id;index:rep_ref_unique_idx,unique"`
+	LocalResourceID       string `gorm:"size:128;column:local_resource_id"`
 	ReporterType          string `gorm:"size:128;column:reporter_type;index:rep_ref_unique_idx,unique;not null"`
 	ResourceType          string `gorm:"size:128;column:resource_type;index:rep_ref_unique_idx,unique;not null"`
 	ReporterInstanceID    string `gorm:"size:128;column:reporter_instance_id;index:rep_ref_unique_idx,unique;not null"`
