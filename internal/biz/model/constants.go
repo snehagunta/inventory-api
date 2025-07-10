@@ -18,9 +18,10 @@ const (
 	MaxConsoleHrefLength        = MaxFieldSize512
 
 	// Minimum values for validation
-	MinVersionValue    = 0 // Version can be zero or positive (>= 0)
-	MinGenerationValue = 0 // Generation can be zero or positive (>= 0)
-	MinCommonVersion   = 0 // CommonVersion can be zero or positive (>= 0)
+	MinVersionValue          = 0 // Version can be zero or positive (>= 0)
+	MinGenerationValue       = 0 // Generation can be zero or positive (>= 0)
+	MinCommonVersion         = 0 // CommonVersion can be zero or positive (>= 0)
+	MinRepresentationVersion = 0 // RepresentationVersion can be zero or positive (>= 0)
 )
 
 // Column name constants
@@ -43,11 +44,16 @@ const (
 	ColumnCommonVersion      = "common_version"
 	ColumnTombstone          = "tombstone"
 	ColumnReporterVersion    = "reporter_version"
+
+	// RepresentationReference columns
+	ColumnRepresentationReferenceResourceID = "resource_id"
+	ColumnRepresentationVersion             = "representation_version"
 )
 
 // Index names
 const (
-	ReporterRepresentationUniqueIndex = "reporter_rep_unique_idx"
+	ReporterRepresentationUniqueIndex  = "reporter_rep_unique_idx"
+	RepresentationReferenceUniqueIndex = "unique_rep_ref_idx"
 )
 
 // Database type constants

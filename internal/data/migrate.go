@@ -24,6 +24,8 @@ func Migrate(db *gorm.DB, logger *log.Helper) error {
 		&model_legacy.OutboxEvent{},
 		&model.ReporterRepresentation{},
 		&model.CommonRepresentation{},
+		&model.RepresentationReference{},
+		&model.Resource{},
 	}
 
 	if err := db.AutoMigrate(models...); err != nil {
