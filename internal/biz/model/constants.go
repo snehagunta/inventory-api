@@ -53,7 +53,7 @@ const (
 // Index names
 const (
 	ReporterRepresentationUniqueIndex  = "reporter_rep_unique_idx"
-	RepresentationReferenceUniqueIndex = "unique_rep_ref_idx"
+	RepresentationReferenceUniqueIndex = "rep_ref_unique_idx"
 )
 
 // Database type constants

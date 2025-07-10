@@ -12,14 +12,14 @@ import (
 // through factory methods that enforce validation rules.
 // Note: Fields are exported for GORM compatibility but should not be modified directly.
 type RepresentationReference struct {
-	ResourceID uuid.UUID `gorm:"type:uuid;column:resource_id;index:unique_rep_ref_idx,unique;not null;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	ResourceID uuid.UUID `gorm:"type:uuid;column:resource_id;index:rep_ref_unique_idx,unique;not null;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 
-	LocalResourceID       string `gorm:"size:128;column:local_resource_id;index:unique_rep_ref_idx,unique"`
-	ReporterType          string `gorm:"size:128;column:reporter_type;index:unique_rep_ref_idx,unique;not null"`
-	ResourceType          string `gorm:"size:128;column:resource_type;index:unique_rep_ref_idx,unique;not null"`
-	ReporterInstanceID    string `gorm:"size:128;column:reporter_instance_id;index:unique_rep_ref_idx,unique;not null"`
-	RepresentationVersion int    `gorm:"type:bigint;column:representation_version;index:unique_rep_ref_idx,unique;check:representation_version >= 0"`
-	Generation            int    `gorm:"type:bigint;column:generation;index:unique_rep_ref_idx,unique;check:generation >= 0"`
+	LocalResourceID       string `gorm:"size:128;column:local_resource_id;index:rep_ref_unique_idx,unique"`
+	ReporterType          string `gorm:"size:128;column:reporter_type;index:rep_ref_unique_idx,unique;not null"`
+	ResourceType          string `gorm:"size:128;column:resource_type;index:rep_ref_unique_idx,unique;not null"`
+	ReporterInstanceID    string `gorm:"size:128;column:reporter_instance_id;index:rep_ref_unique_idx,unique;not null"`
+	RepresentationVersion int    `gorm:"type:bigint;column:representation_version;index:rep_ref_unique_idx,unique;check:representation_version >= 0"`
+	Generation            int    `gorm:"type:bigint;column:generation;index:rep_ref_unique_idx,unique;check:generation >= 0"`
 	Tombstone             bool   `gorm:"column:tombstone"`
 }
 
