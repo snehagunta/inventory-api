@@ -7,10 +7,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// RepresentationReference is an immutable value object representing a reference between resources and their representations.
-// It follows DDD principles where value objects are immutable and should be created
-// through factory methods that enforce validation rules.
-// Note: Fields are exported for GORM compatibility but should not be modified directly.
+// RepresentationReference represents a reference between resources and their representations.
+// While the struct follows DDD principles with factory methods for validation,
+// it is mutable to allow for version updates and other modifications during its lifecycle.
+// Note: Fields are exported for GORM compatibility but should be modified through provided methods.
 type RepresentationReference struct {
 	ResourceID uuid.UUID `gorm:"type:uuid;column:resource_id;index:rep_ref_unique_idx,unique;not null;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 
@@ -24,7 +24,7 @@ type RepresentationReference struct {
 }
 
 // NewRepresentationReference creates a RepresentationReference
-// This enforces immutability by validating all inputs and creating a valid instance
+// This enforces validation rules and creates a valid instance
 func NewRepresentationReference(
 	resourceID uuid.UUID,
 	localResourceID string,
@@ -52,6 +52,16 @@ func NewRepresentationReference(
 	}
 
 	return rr, nil
+}
+
+// UpdateVersion updates the RepresentationVersion field while maintaining validation
+// This method allows for safe mutation of the version field
+func (rr *RepresentationReference) UpdateVersion(newVersion int) error {
+	if newVersion < MinRepresentationVersion {
+		return ValidationError{Field: "RepresentationVersion", Message: fmt.Sprintf("must be >= %d", MinRepresentationVersion)}
+	}
+	rr.RepresentationVersion = newVersion
+	return nil
 }
 
 // validateRepresentationReference validates a RepresentationReference instance
