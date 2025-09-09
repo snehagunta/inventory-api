@@ -213,6 +213,11 @@ func (uc *Usecase) CheckForUpdate(ctx context.Context, permission, namespace str
 	return false, nil
 }
 
+// LookupResources delegates resource lookup to the authorization service.
+func (uc *Usecase) LookupResources(ctx context.Context, request *kessel.LookupResourcesRequest) (grpc.ServerStreamingClient[kessel.LookupResourcesResponse], error) {
+	return uc.Authz.LookupResources(ctx, request)
+}
+
 func (uc *Usecase) createResource(tx *gorm.DB, request *v1beta2.ReportResourceRequest, txidStr string) error {
 	resourceId, err := uc.resourceRepository.NextResourceId()
 	if err != nil {
@@ -382,201 +387,29 @@ func getNextTransactionID() (string, error) {
 	return txid.String(), nil
 }
 
-// Upsert creates a new resource or updates an existing one based on the reporter resource ID.
-// It supports read-after-write consistency when enabled and handles notification waiting.
-func (uc *Usecase) Upsert(ctx context.Context, m *model_legacy.Resource, write_visibility v1beta2.WriteVisibility) (*model_legacy.Resource, error) {
-	log.Info("upserting resource: ", m)
-	var ret *model_legacy.Resource
-	var subscription pubsub.Subscription
-	var txidStr string
-
-	// check if the resource already exists
-	existingResource, err := uc.LegacyReporterResourceRepository.FindByReporterResourceIdv1beta2(ctx, model_legacy.ReporterResourceIdv1beta2FromResource(m))
-
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrDatabaseError
-	}
-
-	readAfterWriteEnabled := computeReadAfterWriteLegacy(uc, write_visibility, m)
-	if readAfterWriteEnabled && uc.Config.ConsumerEnabled {
-		// Generate txid for data layer
-		// TODO: Replace this when inventory api has proper api-level transaction ids
-		txid, err := uuid.NewV7()
-		if err != nil {
-			return nil, err
-		}
-		txidStr = txid.String()
-		subscription = uc.ListenManager.Subscribe(txidStr)
-		defer subscription.Unsubscribe()
-	}
-
-	log.Info("found existing resource: ", existingResource)
-	if existingResource != nil {
-		return updateExistingReporterResource(ctx, m, existingResource, uc, txidStr)
-	}
-
-	//TODO: Bug here that needs to be fixed : https://issues.redhat.com/browse/RHCLOUD-39044
-	if m.InventoryId != nil {
-		err2 := validateSameResourceFromMultipleReportersShareInventoryId(ctx, m, uc)
-		if err2 != nil {
-			return nil, err2
+// Check if request comes from SP in allowlist
+func isSPInAllowlist(reporterPrincipal string, allowlist []string) bool {
+	for _, sp := range allowlist {
+		// either specific SP or everyone
+		if sp == reporterPrincipal || sp == "*" {
+			return true
 		}
 	}
 
-	log.Info("Creating resource: ", m)
-	ret, err = createNewReporterResource(ctx, m, uc, txidStr)
-	if err != nil {
-		return ret, err
-	}
-
-	if readAfterWriteEnabled && uc.Config.ConsumerEnabled {
-		timeoutCtx, cancel := context.WithTimeout(ctx, listenTimeout)
-		defer cancel()
-
-		_, err := uc.waitForNotifBreaker.Execute(func() (interface{}, error) {
-			err = subscription.BlockForNotification(timeoutCtx)
-			if err != nil {
-				// Return error for circuit breaker
-				return nil, err
-			}
-			return nil, nil
-		})
-
-		if err != nil {
-			switch {
-			case errors.Is(err, pubsub.ErrWaitContextCancelled):
-				uc.Log.WithContext(ctx).Debugf("Reached timeout waiting for notification from consumer")
-				return ret, nil
-			case errors.Is(err, gobreaker.ErrOpenState):
-				uc.Log.WithContext(ctx).Debugf("Circuit breaker is open, skipped waiting for notification from consumer")
-				return ret, nil
-			case errors.Is(err, gobreaker.ErrTooManyRequests):
-				uc.Log.WithContext(ctx).Debugf("Circuit breaker is half-open, skipped waiting for notification from consumer")
-				return ret, nil
-			default:
-				return nil, err
-			}
-		}
-	}
-
-	uc.Log.WithContext(ctx).Infof("Upserted Resource: %v(%v)", ret.ID, ret.ResourceType)
-	return ret, nil
+	return false
 }
 
-func createNewReporterResource(ctx context.Context, m *model_legacy.Resource, uc *Usecase, txid string) (*model_legacy.Resource, error) {
-	ret, err := uc.LegacyReporterResourceRepository.Create(ctx, m, uc.Namespace, txid)
-
-	if err != nil {
-		return nil, err
+func computeReadAfterWrite(uc *Usecase, write_visibility v1beta2.WriteVisibility, reporterPrincipal string) bool {
+	// read after write functionality is enabled/disabled globally.
+	// And executed if request specifies and
+	// came from service provider in allowlist
+	if write_visibility == v1beta2.WriteVisibility_WRITE_VISIBILITY_UNSPECIFIED || write_visibility == v1beta2.WriteVisibility_MINIMIZE_LATENCY {
+		return false
 	}
-
-	return ret, nil
+	return !common.IsNil(uc.ListenManager) && uc.Config.ReadAfterWriteEnabled && isSPInAllowlist(reporterPrincipal, uc.Config.ReadAfterWriteAllowlist)
 }
 
-func validateSameResourceFromMultipleReportersShareInventoryId(ctx context.Context, m *model_legacy.Resource, uc *Usecase) error {
-	// Multiple reporters should have same inventory id.
-	existingInventoryIdResource, err := uc.LegacyReporterResourceRepository.FindByInventoryIdAndResourceType(ctx, m.InventoryId, m.ResourceType)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return ErrDatabaseError
-	}
-
-	if existingInventoryIdResource != nil {
-		existingResourceRepo, err := uc.LegacyReporterResourceRepository.FindByInventoryIdAndReporter(ctx, m.InventoryId, m.ReporterInstanceId, m.ReporterType)
-		if existingResourceRepo != nil {
-			return ErrResourceAlreadyExists
-		}
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-	}
-	return nil
-}
-
-func updateExistingReporterResource(ctx context.Context, m *model_legacy.Resource, existingResource *model_legacy.Resource, uc *Usecase, txid string) (*model_legacy.Resource, error) {
-
-	if m.InventoryId != nil && existingResource.InventoryId.String() != m.InventoryId.String() {
-		return nil, ErrInventoryIdMismatch
-	}
-	log.Info("Updating resource: ", m)
-	ret, err := uc.LegacyReporterResourceRepository.Update(ctx, m, existingResource.ID, uc.Namespace, txid)
-	if err != nil {
-		return nil, err
-	}
-
-	uc.Log.WithContext(ctx).Infof("Updated Resource: %v(%v)", m.ID, m.ResourceType)
-	return ret, nil
-}
-
-// LookupResources delegates resource lookup to the authorization service.
-func (uc *Usecase) LookupResources(ctx context.Context, request *kessel.LookupResourcesRequest) (grpc.ServerStreamingClient[kessel.LookupResourcesResponse], error) {
-	return uc.Authz.LookupResources(ctx, request)
-}
-
-// CheckLegacy verifies if a subject has the specified permission on a resource identified by the reporter resource ID.
-func (uc *Usecase) CheckLegacy(ctx context.Context, permission, namespace string, sub *kessel.SubjectReference, id model_legacy.ReporterResourceId) (bool, error) {
-	res, err := uc.LegacyReporterResourceRepository.FindByReporterResourceId(ctx, id)
-	if err != nil {
-		// If the resource doesn't exist in inventory (ie. no consistency token available)
-		// we send a check request with minimize latency
-		// err otherwise.
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return false, err
-		}
-		res = &model_legacy.Resource{ResourceType: id.ResourceType, ReporterResourceId: id.LocalResourceId}
-	}
-
-	allowed, _, err := uc.Authz.Check(ctx, namespace, permission, res.ConsistencyToken, res.ResourceType, res.ReporterResourceId, sub)
-	if err != nil {
-		return false, err
-	}
-
-	if allowed == kessel.CheckResponse_ALLOWED_TRUE {
-		return true, nil
-	}
-	return false, nil
-}
-
-// CheckForUpdateLegacy verifies if a subject has the specified permission to update a resource,
-// and records the consistency token if the check passes and the resource exists.
-func (uc *Usecase) CheckForUpdateLegacy(ctx context.Context, permission, namespace string, sub *kessel.SubjectReference, id model_legacy.ReporterResourceId) (bool, error) {
-	res, err := uc.LegacyReporterResourceRepository.FindByReporterResourceId(ctx, id)
-	recordToken := true
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// resource doesn't exist yet.
-			// DONT write consistency token
-			// no actual resource exists in DB to update
-			recordToken = false
-			res = &model_legacy.Resource{ResourceType: id.ResourceType, ReporterResourceId: id.LocalResourceId}
-		} else {
-			return false, err
-		}
-	}
-
-	allowed, consistency, err := uc.Authz.CheckForUpdate(ctx, namespace, permission, res.ResourceType, res.ReporterResourceId, sub)
-	if err != nil {
-		return false, err
-	}
-
-	if allowed == kessel.CheckForUpdateResponse_ALLOWED_TRUE {
-		if id.ResourceType == "workspace" && namespace == "rbac" { //TODO: delete this when workspaces are resources
-			return true, nil
-		}
-
-		// Only update consistency token if resource exists in DB.
-		if recordToken && consistency != nil {
-			res.ConsistencyToken = consistency.Token
-			_, err := uc.LegacyReporterResourceRepository.Update(ctx, res, res.ID, uc.Namespace, "")
-			if err != nil {
-				return false, err // we're allowed, but failed to update consistency token
-			}
-		}
-
-		return true, nil
-	}
-
-	return false, nil
-}
+/***** Everything below this is deprecated ******/
 
 // ListResourcesInWorkspace retrieves all resources in a workspace and filters them based on authorization.
 // It uses worker goroutines to perform authorization checks concurrently and returns channels for results and errors.
@@ -777,48 +610,4 @@ func (uc *Usecase) Delete(ctx context.Context, id model_legacy.ReporterResourceI
 	uc.Log.WithContext(ctx).Infof("Deleted Resource: %v(%v)", m.ID, m.ResourceType)
 	return nil
 
-}
-
-// Check if request comes from SP in allowlist
-func isSPInAllowlistLegacy(m *model_legacy.Resource, allowlist []string) bool {
-	for _, sp := range allowlist {
-		// either specific SP or everyone
-		if sp == m.ReporterId || sp == "*" {
-			return true
-		}
-	}
-
-	return false
-}
-
-func computeReadAfterWriteLegacy(uc *Usecase, write_visibility v1beta2.WriteVisibility, m *model_legacy.Resource) bool {
-	// read after write functionality is enabled/disabled globally.
-	// And executed if request specifies and
-	// came from service provider in allowlist
-	if write_visibility == v1beta2.WriteVisibility_WRITE_VISIBILITY_UNSPECIFIED || write_visibility == v1beta2.WriteVisibility_MINIMIZE_LATENCY {
-		return false
-	}
-	return !common.IsNil(uc.ListenManager) && uc.Config.ReadAfterWriteEnabled && isSPInAllowlistLegacy(m, uc.Config.ReadAfterWriteAllowlist)
-}
-
-// Check if request comes from SP in allowlist
-func isSPInAllowlist(reporterPrincipal string, allowlist []string) bool {
-	for _, sp := range allowlist {
-		// either specific SP or everyone
-		if sp == reporterPrincipal || sp == "*" {
-			return true
-		}
-	}
-
-	return false
-}
-
-func computeReadAfterWrite(uc *Usecase, write_visibility v1beta2.WriteVisibility, reporterPrincipal string) bool {
-	// read after write functionality is enabled/disabled globally.
-	// And executed if request specifies and
-	// came from service provider in allowlist
-	if write_visibility == v1beta2.WriteVisibility_WRITE_VISIBILITY_UNSPECIFIED || write_visibility == v1beta2.WriteVisibility_MINIMIZE_LATENCY {
-		return false
-	}
-	return !common.IsNil(uc.ListenManager) && uc.Config.ReadAfterWriteEnabled && isSPInAllowlist(reporterPrincipal, uc.Config.ReadAfterWriteAllowlist)
 }

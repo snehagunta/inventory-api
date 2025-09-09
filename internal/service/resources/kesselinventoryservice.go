@@ -16,7 +16,6 @@ import (
 	"github.com/project-kessel/inventory-api/internal/middleware"
 	conv "github.com/project-kessel/inventory-api/internal/service/common"
 	pbv1beta1 "github.com/project-kessel/relations-api/api/kessel/relations/v1beta1"
-	"github.com/spf13/viper"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -32,33 +31,18 @@ func NewKesselInventoryServiceV1beta2(c *resources.Usecase) *InventoryService {
 	}
 }
 
-func (c *InventoryService) useV1beta2Db() bool {
-	return viper.GetBool("service.use_v1beta2_db")
-}
-
 func (c *InventoryService) ReportResource(ctx context.Context, r *pb.ReportResourceRequest) (*pb.ReportResourceResponse, error) {
 	identity, err := middleware.GetIdentity(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if c.useV1beta2Db() {
-		log.Info("New Report Resource")
-		err := c.Ctl.ReportResource(ctx, r, identity.Principal)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		log.Info("Old Report Resource")
-		resource, err := RequestToResource(r, identity)
-		if err != nil {
-			return nil, err
-		}
-		_, err = c.Ctl.Upsert(ctx, resource, r.GetWriteVisibility())
-		if err != nil {
-			return nil, err
-		}
+	log.Info("New Report Resource")
+	err = c.Ctl.ReportResource(ctx, r, identity.Principal)
+	if err != nil {
+		return nil, err
 	}
+
 	return ResponseFromResource(), nil
 
 }
@@ -92,64 +76,36 @@ func (c *InventoryService) DeleteResource(ctx context.Context, r *pb.DeleteResou
 }
 
 func (s *InventoryService) Check(ctx context.Context, req *pb.CheckRequest) (*pb.CheckResponse, error) {
-	identity, err := middleware.GetIdentity(ctx)
+	_, err := middleware.GetIdentity(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "failed to get identity: %v", err)
 	}
-
-	if s.useV1beta2Db() {
-		log.Info("Check using v1beta2 db")
-		if reporterResourceKey, err := reporterKeyFromResourceReference(req.Object); err == nil {
-			if resp, err := s.Ctl.Check(ctx, req.GetRelation(), req.Object.Reporter.GetType(), subjectReferenceFromSubject(req.GetSubject()), reporterResourceKey); err == nil {
-				return viewResponseFromAuthzRequestV1beta2(resp), nil
-			} else {
-				return nil, err
-			}
+	log.Info("Check using v1beta2 db")
+	if reporterResourceKey, err := reporterKeyFromResourceReference(req.Object); err == nil {
+		if resp, err := s.Ctl.Check(ctx, req.GetRelation(), req.Object.Reporter.GetType(), subjectReferenceFromSubject(req.GetSubject()), reporterResourceKey); err == nil {
+			return viewResponseFromAuthzRequestV1beta2(resp), nil
 		} else {
 			return nil, err
 		}
 	} else {
-		log.Info("Check using v1beta1 db")
-		if resource, err := authzFromRequestV1beta2(identity, req.Object); err == nil {
-			if resp, err := s.Ctl.CheckLegacy(ctx, req.GetRelation(), req.Object.Reporter.GetType(), subjectReferenceFromSubject(req.GetSubject()), *resource); err == nil {
-				return viewResponseFromAuthzRequestV1beta2(resp), nil
-			} else {
-				return nil, err
-			}
-		} else {
-			return nil, err
-		}
+		return nil, err
 	}
 }
 
 func (s *InventoryService) CheckForUpdate(ctx context.Context, req *pb.CheckForUpdateRequest) (*pb.CheckForUpdateResponse, error) {
-	identity, err := middleware.GetIdentity(ctx)
+	_, err := middleware.GetIdentity(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "failed to get identity: %v", err)
 	}
-
-	if s.useV1beta2Db() {
-		log.Info("CheckForUpdate using v1beta2 db")
-		if reporterResourceKey, err := reporterKeyFromResourceReference(req.Object); err == nil {
-			if resp, err := s.Ctl.CheckForUpdate(ctx, req.GetRelation(), req.Object.Reporter.GetType(), subjectReferenceFromSubject(req.GetSubject()), reporterResourceKey); err == nil {
-				return updateResponseFromAuthzRequestV1beta2(resp), nil
-			} else {
-				return nil, err
-			}
+	log.Info("CheckForUpdate using v1beta2 db")
+	if reporterResourceKey, err := reporterKeyFromResourceReference(req.Object); err == nil {
+		if resp, err := s.Ctl.CheckForUpdate(ctx, req.GetRelation(), req.Object.Reporter.GetType(), subjectReferenceFromSubject(req.GetSubject()), reporterResourceKey); err == nil {
+			return updateResponseFromAuthzRequestV1beta2(resp), nil
 		} else {
 			return nil, err
 		}
 	} else {
-		log.Info("CheckForUpdate using v1beta1 db")
-		if resource, err := authzFromRequestV1beta2(identity, req.Object); err == nil {
-			if resp, err := s.Ctl.CheckForUpdateLegacy(ctx, req.GetRelation(), req.Object.Reporter.GetType(), subjectReferenceFromSubject(req.GetSubject()), *resource); err == nil {
-				return updateResponseFromAuthzRequestV1beta2(resp), nil
-			} else {
-				return nil, err
-			}
-		} else {
-			return nil, err
-		}
+		return nil, err
 	}
 }
 
@@ -253,15 +209,6 @@ func ToLookupResourceResponse(response *pbv1beta1.LookupResourcesResponse) *pb.S
 			ContinuationToken: response.Pagination.ContinuationToken,
 		},
 	}
-}
-
-func authzFromRequestV1beta2(identity *authnapi.Identity, resource *pb.ResourceReference) (*model_legacy.ReporterResourceId, error) {
-	return &model_legacy.ReporterResourceId{
-		LocalResourceId: resource.ResourceId,
-		ResourceType:    resource.ResourceType,
-		ReporterId:      identity.Principal,
-		ReporterType:    identity.Type,
-	}, nil
 }
 
 func reporterKeyFromResourceReference(resource *pb.ResourceReference) (model.ReporterResourceKey, error) {
