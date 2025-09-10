@@ -20,7 +20,7 @@ func Migrate(db *gorm.DB, logger *log.Helper) error {
 		&model_legacy.RelationshipHistory{},
 		&model_legacy.LocalInventoryToResource{}, // Deprecated
 		&model_legacy.InventoryResource{},
-		&model_legacy.OutboxEvent{},
+		&model.OutboxEvent{},
 		&model.ReporterRepresentation{},
 		&model.CommonRepresentation{},
 		&model.ReporterResource{},

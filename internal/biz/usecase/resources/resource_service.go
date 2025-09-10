@@ -272,7 +272,7 @@ func (uc *Usecase) createResource(tx *gorm.DB, request *v1beta2.ReportResourceRe
 		return err
 	}
 
-	return uc.resourceRepository.Save(tx, resource, model_legacy.OperationTypeCreated, txidStr)
+	return uc.resourceRepository.Save(tx, resource, model.OperationTypeCreated, txidStr)
 }
 
 func getReporterResourceKeyFromRequest(request *v1beta2.ReportResourceRequest) (model.ReporterResourceKey, error) {
@@ -322,7 +322,7 @@ func (uc *Usecase) updateResource(tx *gorm.DB, request *v1beta2.ReportResourceRe
 		return fmt.Errorf("failed to update resource: %w", err)
 	}
 
-	return uc.resourceRepository.Save(tx, *existingResource, model_legacy.OperationTypeUpdated, txidStr)
+	return uc.resourceRepository.Save(tx, *existingResource, model.OperationTypeUpdated, txidStr)
 }
 
 func extractUpdateDataFromRequest(request *v1beta2.ReportResourceRequest) (

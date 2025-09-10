@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/project-kessel/inventory-api/cmd/common"
+	bizmodel "github.com/project-kessel/inventory-api/internal/biz/model"
 	"github.com/project-kessel/inventory-api/internal/consumer/auth"
 	"github.com/project-kessel/inventory-api/internal/consumer/retry"
 	datamodel "github.com/project-kessel/inventory-api/internal/data/model"
@@ -198,7 +199,7 @@ func (i *InventoryConsumer) Consume() error {
 					continue
 				}
 
-				if operation != string(model_legacy.OperationTypeDeleted) {
+				if operation != string(bizmodel.OperationTypeDeleted) {
 					inventoryID, err := ParseMessageKey(e.Key)
 					if err != nil {
 						metricscollector.Incr(i.MetricsCollector.MsgProcessFailures, "ParseMessageKey", err)
@@ -279,7 +280,7 @@ func (i *InventoryConsumer) ProcessMessage(headers map[string]string, relationsE
 	txid := headers["txid"]
 
 	switch operation {
-	case string(model_legacy.OperationTypeCreated):
+	case string(bizmodel.OperationTypeCreated):
 		i.Logger.Infof("processing message: operation=%s, txid=%s", operation, txid)
 		i.Logger.Debugf("processed message tuple=%s", msg.Value)
 		if relationsEnabled {
@@ -300,7 +301,7 @@ func (i *InventoryConsumer) ProcessMessage(headers map[string]string, relationsE
 			return resp, nil
 		}
 
-	case string(model_legacy.OperationTypeUpdated):
+	case string(bizmodel.OperationTypeUpdated):
 		i.Logger.Infof("processing message: operation=%s, txid=%s", operation, txid)
 		i.Logger.Debugf("processed message tuple=%s", msg.Value)
 		if relationsEnabled {
@@ -320,7 +321,7 @@ func (i *InventoryConsumer) ProcessMessage(headers map[string]string, relationsE
 			}
 			return resp, nil
 		}
-	case string(model_legacy.OperationTypeDeleted):
+	case string(bizmodel.OperationTypeDeleted):
 		i.Logger.Infof("processing message: operation=%s, txid=%s", operation, txid)
 		i.Logger.Debugf("processed message tuple=%s", msg.Value)
 		if relationsEnabled {
