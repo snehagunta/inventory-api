@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/google/uuid"
+	"github.com/project-kessel/inventory-api/internal/data/model"
 	"github.com/project-kessel/inventory-api/internal/metricscollector"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -167,7 +168,7 @@ func TestCreateResource(t *testing.T) {
 	assert.Equal(t, *resource.InventoryId, inventoryResource[0].ID)
 
 	// Nothing exists in the outbox (expected)
-	outboxEvents := []model_legacy.OutboxEvent{}
+	outboxEvents := []model.OutboxEvent{}
 	assert.Nil(t, db.Find(&outboxEvents).Error)
 	assert.Len(t, outboxEvents, 0)
 }
@@ -214,7 +215,7 @@ func TestCreateResourceWithInventoryId(t *testing.T) {
 	assert.Equal(t, resource2.WorkspaceId, inventoryResource[0].WorkspaceId)
 
 	// Nothing exists in the outbox (expected)
-	outboxEvents := []model_legacy.OutboxEvent{}
+	outboxEvents := []model.OutboxEvent{}
 	assert.Nil(t, db.Find(&outboxEvents).Error)
 	assert.Len(t, outboxEvents, 0)
 }
@@ -231,7 +232,7 @@ func TestUpdateFailsIfResourceNotFound(t *testing.T) {
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 
 	// Nothing exists in the outbox (expected)
-	outboxEvents := []model_legacy.OutboxEvent{}
+	outboxEvents := []model.OutboxEvent{}
 	assert.Nil(t, db.Find(&outboxEvents).Error)
 	assert.Len(t, outboxEvents, 0)
 }
@@ -273,7 +274,7 @@ func TestUpdateResource(t *testing.T) {
 	assert.Equal(t, r2.WorkspaceId, inventoryResource[0].WorkspaceId)
 
 	// Nothing exists in the outbox (expected)
-	outboxEvents := []model_legacy.OutboxEvent{}
+	outboxEvents := []model.OutboxEvent{}
 	assert.Nil(t, db.Find(&outboxEvents).Error)
 	assert.Len(t, outboxEvents, 0)
 }
@@ -290,7 +291,7 @@ func TestDeleteFailsIfResourceNotFound(t *testing.T) {
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 
 	// Nothing exists in the outbox (expected)
-	outboxEvents := []model_legacy.OutboxEvent{}
+	outboxEvents := []model.OutboxEvent{}
 	assert.Nil(t, db.Find(&outboxEvents).Error)
 	assert.Len(t, outboxEvents, 0)
 }
@@ -327,7 +328,7 @@ func TestDeleteAfterCreate(t *testing.T) {
 	assert.Equal(t, int64(0), count)
 
 	// Nothing exists in the outbox (expected)
-	outboxEvents := []model_legacy.OutboxEvent{}
+	outboxEvents := []model.OutboxEvent{}
 	assert.Nil(t, db.Find(&outboxEvents).Error)
 	assert.Len(t, outboxEvents, 0)
 }
@@ -356,7 +357,7 @@ func TestDeleteAfterUpdate(t *testing.T) {
 	assertEqualResourceHistory(t, r, &resourceHistory[2], model_legacy.OperationTypeDelete)
 
 	// Nothing exists in the outbox (expected)
-	outboxEvents := []model_legacy.OutboxEvent{}
+	outboxEvents := []model.OutboxEvent{}
 	assert.Nil(t, db.Find(&outboxEvents).Error)
 	assert.Len(t, outboxEvents, 0)
 }

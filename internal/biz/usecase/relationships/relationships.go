@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	bizmodel "github.com/project-kessel/inventory-api/internal/biz/model"
+	"github.com/project-kessel/inventory-api/internal"
 	"github.com/project-kessel/inventory-api/internal/middleware"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -77,7 +77,7 @@ func (uc *Usecase) Create(ctx context.Context, m *model_legacy.Relationship) (*m
 	}
 
 	if uc.eventer != nil {
-		err := DefaultRelationshipSendEvent(ctx, m, uc.eventer, *m.CreatedAt, bizmodel.OperationTypeCreated)
+		err := DefaultRelationshipSendEvent(ctx, m, uc.eventer, *m.CreatedAt, internal.OperationTypeCreated)
 
 		if err != nil {
 			return nil, err
@@ -116,7 +116,7 @@ func (uc *Usecase) Update(ctx context.Context, m *model_legacy.Relationship, id 
 	}
 
 	if uc.eventer != nil {
-		err := DefaultRelationshipSendEvent(ctx, m, uc.eventer, *m.UpdatedAt, bizmodel.OperationTypeUpdated)
+		err := DefaultRelationshipSendEvent(ctx, m, uc.eventer, *m.UpdatedAt, internal.OperationTypeUpdated)
 
 		if err != nil {
 			return nil, err
@@ -153,7 +153,7 @@ func (uc *Usecase) Delete(ctx context.Context, id model_legacy.ReporterRelations
 	}
 
 	if uc.eventer != nil {
-		err := DefaultRelationshipSendEvent(ctx, m, uc.eventer, time.Now(), bizmodel.OperationTypeDeleted)
+		err := DefaultRelationshipSendEvent(ctx, m, uc.eventer, time.Now(), internal.OperationTypeDeleted)
 
 		if err != nil {
 			return err
@@ -166,7 +166,7 @@ func (uc *Usecase) Delete(ctx context.Context, id model_legacy.ReporterRelations
 
 // Moved here from common.go since it's not used outside this file, so keeping it here avoids maintaining an unnecessary common.go.
 
-func DefaultRelationshipSendEvent(ctx context.Context, m *model_legacy.Relationship, eventer eventingapi.Manager, reportedTime time.Time, operationType bizmodel.EventOperationType) error {
+func DefaultRelationshipSendEvent(ctx context.Context, m *model_legacy.Relationship, eventer eventingapi.Manager, reportedTime time.Time, operationType internal.EventOperationType) error {
 	identity, err := middleware.GetIdentity(ctx)
 	if err != nil {
 		return err

@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/project-kessel/inventory-api/internal"
-	bizmodel "github.com/project-kessel/inventory-api/internal/biz/model"
 
 	"github.com/project-kessel/inventory-api/internal/biz/model_legacy"
 )
@@ -86,7 +85,7 @@ type RelationshipReporter struct {
 }
 
 // NewResourceEvent creates a new Event for resource operations.
-func NewResourceEvent(operationType bizmodel.EventOperationType, resource *model_legacy.Resource, reportedTime time.Time) (*Event, error) {
+func NewResourceEvent(operationType internal.EventOperationType, resource *model_legacy.Resource, reportedTime time.Time) (*Event, error) {
 	const eventType = "resources"
 
 	eventId, err := uuid.NewUUID() // Todo: we need to have an stable id if we implement some re-trying logic
@@ -107,11 +106,11 @@ func NewResourceEvent(operationType bizmodel.EventOperationType, resource *model
 	var deletedAt *time.Time
 
 	switch operationType {
-	case bizmodel.OperationTypeCreated:
+	case internal.OperationTypeCreated:
 		createdAt = &reportedTime
-	case bizmodel.OperationTypeUpdated:
+	case internal.OperationTypeUpdated:
 		updatedAt = &reportedTime
-	case bizmodel.OperationTypeDeleted:
+	case internal.OperationTypeDeleted:
 		deletedAt = &reportedTime
 	}
 
@@ -148,7 +147,7 @@ func NewResourceEvent(operationType bizmodel.EventOperationType, resource *model
 }
 
 // NewRelationshipEvent creates a new Event for relationship operations.
-func NewRelationshipEvent(operationType bizmodel.EventOperationType, relationship *model_legacy.Relationship, reportedTime time.Time) (*Event, error) {
+func NewRelationshipEvent(operationType internal.EventOperationType, relationship *model_legacy.Relationship, reportedTime time.Time) (*Event, error) {
 	const eventType = "resources-relationship"
 
 	eventId, err := uuid.NewUUID() // Todo: we need to have an stable id if we implement some re-trying logic
@@ -161,11 +160,11 @@ func NewRelationshipEvent(operationType bizmodel.EventOperationType, relationshi
 	var deletedAt *time.Time
 
 	switch operationType {
-	case bizmodel.OperationTypeCreated:
+	case internal.OperationTypeCreated:
 		createdAt = &reportedTime
-	case bizmodel.OperationTypeUpdated:
+	case internal.OperationTypeUpdated:
 		updatedAt = &reportedTime
-	case bizmodel.OperationTypeDeleted:
+	case internal.OperationTypeDeleted:
 		deletedAt = &reportedTime
 	}
 

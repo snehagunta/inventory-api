@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/google/uuid"
-	bizmodel "github.com/project-kessel/inventory-api/internal/biz/model"
+	"github.com/project-kessel/inventory-api/internal"
 	"github.com/project-kessel/inventory-api/internal/metricscollector"
 	"gorm.io/gorm"
 
@@ -93,14 +93,14 @@ func (r *Repo) Create(ctx context.Context, m *model_legacy.Resource, namespace s
 		}
 
 		// Publish outbox events for primary resource
-		err = handleOutboxEvents(tx, resource, namespace, bizmodel.OperationTypeCreated, txid)
+		err = handleOutboxEvents(tx, resource, namespace, internal.OperationTypeCreated, txid)
 		if err != nil {
 			return err
 		}
 
 		// Publish outbox events for other resources with the same inventory ID
 		for _, updatedResource := range updatedResources {
-			err = handleOutboxEvents(tx, *updatedResource, namespace, bizmodel.OperationTypeUpdated, "")
+			err = handleOutboxEvents(tx, *updatedResource, namespace, internal.OperationTypeUpdated, "")
 			if err != nil {
 				return err
 			}
@@ -111,7 +111,7 @@ func (r *Repo) Create(ctx context.Context, m *model_legacy.Resource, namespace s
 	if err != nil {
 		return nil, err
 	}
-	metricscollector.Incr(r.MetricsCollector.OutboxEventWrites, string(bizmodel.OperationTypeCreated), nil)
+	metricscollector.Incr(r.MetricsCollector.OutboxEventWrites, string(internal.OperationTypeCreated), nil)
 	return result, nil
 }
 
@@ -143,14 +143,14 @@ func (r *Repo) Update(ctx context.Context, m *model_legacy.Resource, id uuid.UUI
 		}
 
 		// Publish outbox events for primary resource
-		err = handleOutboxEvents(tx, *m, namespace, bizmodel.OperationTypeUpdated, txid)
+		err = handleOutboxEvents(tx, *m, namespace, internal.OperationTypeUpdated, txid)
 		if err != nil {
 			return err
 		}
 
 		// Publish outbox event for the primary resource and other resources with the same inventory ID
 		for _, updatedResource := range updatedResources {
-			err = handleOutboxEvents(tx, *updatedResource, namespace, bizmodel.OperationTypeUpdated, "")
+			err = handleOutboxEvents(tx, *updatedResource, namespace, internal.OperationTypeUpdated, "")
 			if err != nil {
 				return err
 			}
@@ -162,7 +162,7 @@ func (r *Repo) Update(ctx context.Context, m *model_legacy.Resource, id uuid.UUI
 	if err != nil {
 		return nil, err
 	}
-	metricscollector.Incr(r.MetricsCollector.OutboxEventWrites, string(bizmodel.OperationTypeUpdated), nil)
+	metricscollector.Incr(r.MetricsCollector.OutboxEventWrites, string(internal.OperationTypeUpdated), nil)
 	return result, nil
 }
 
@@ -201,7 +201,7 @@ func (r *Repo) Delete(ctx context.Context, id uuid.UUID, namespace string) (*mod
 			}
 		}
 
-		err = handleOutboxEvents(tx, *resource, namespace, bizmodel.OperationTypeDeleted, "")
+		err = handleOutboxEvents(tx, *resource, namespace, internal.OperationTypeDeleted, "")
 		if err != nil {
 			return err
 		}
@@ -213,7 +213,7 @@ func (r *Repo) Delete(ctx context.Context, id uuid.UUID, namespace string) (*mod
 	if err != nil {
 		return nil, err
 	}
-	metricscollector.Incr(r.MetricsCollector.OutboxEventWrites, string(bizmodel.OperationTypeDeleted), nil)
+	metricscollector.Incr(r.MetricsCollector.OutboxEventWrites, string(internal.OperationTypeDeleted), nil)
 	return result, nil
 }
 
@@ -354,7 +354,7 @@ func (r *Repo) handleWorkspaceUpdates(tx *gorm.DB, m *model_legacy.Resource, upd
 	return updatedResources, nil
 }
 
-func handleOutboxEvents(tx *gorm.DB, resource model_legacy.Resource, namespace string, operationType bizmodel.EventOperationType, txid string) error {
+func handleOutboxEvents(tx *gorm.DB, resource model_legacy.Resource, namespace string, operationType internal.EventOperationType, txid string) error {
 	resourceMessage, tupleMessage, err := model_legacy.NewOutboxEventsFromResource(resource, namespace, operationType, txid)
 	if err != nil {
 		return err

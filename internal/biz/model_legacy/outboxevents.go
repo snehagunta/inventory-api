@@ -8,72 +8,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/project-kessel/inventory-api/internal"
-	bizmodel "github.com/project-kessel/inventory-api/internal/biz/model"
 	datamodel "github.com/project-kessel/inventory-api/internal/data/model"
 	kessel "github.com/project-kessel/relations-api/api/kessel/relations/v1beta1"
 	"google.golang.org/protobuf/proto"
 )
 
-func convertResourceToSetTupleEvent(resourceEvent bizmodel.ResourceReportEvent) (internal.JsonObject, error) {
-	payload := internal.JsonObject{}
-	namespace := strings.ToLower(resourceEvent.ReporterType())
-
-	relationship := &kessel.Relationship{
-		Resource: &kessel.ObjectReference{
-			Type: &kessel.ObjectType{
-				Name:      resourceEvent.ResourceType(),
-				Namespace: namespace,
-			},
-			Id: resourceEvent.LocalResourceId(),
-		},
-		Relation: "workspace",
-		Subject: &kessel.SubjectReference{
-			Subject: &kessel.ObjectReference{
-				Type: &kessel.ObjectType{
-					Name:      "workspace",
-					Namespace: "rbac",
-				},
-				Id: resourceEvent.WorkspaceId(),
-			},
-		},
-	}
-
-	marshalledJson, err := json.Marshal(relationship)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal resource to json: %w", err)
-	}
-	err = json.Unmarshal(marshalledJson, &payload)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal json to payload: %w", err)
-	}
-
-	return payload, nil
-}
-
-func convertResourceToUnsetTupleEvent(resourceEvent bizmodel.ResourceReportEvent) (internal.JsonObject, error) {
-	payload := internal.JsonObject{}
-	namespace := strings.ToLower(resourceEvent.ReporterType())
-
-	tuple := &kessel.RelationTupleFilter{
-		ResourceNamespace: proto.String(namespace),
-		ResourceType:      proto.String(resourceEvent.ResourceType()),
-		ResourceId:        proto.String(resourceEvent.LocalResourceId()),
-		Relation:          proto.String("workspace"),
-	}
-
-	marshalledJson, err := json.Marshal(tuple)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal resource to json: %w", err)
-	}
-	err = json.Unmarshal(marshalledJson, &payload)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal json to payload: %w", err)
-	}
-
-	return payload, nil
-}
-
-func newResourceEventLegacy(operationType bizmodel.EventOperationType, resource *Resource) (*datamodel.ResourceEvent, error) {
+func newResourceEventLegacy(operationType internal.EventOperationType, resource *Resource) (*datamodel.ResourceEvent, error) {
 	const eventType = "resources"
 	now := time.Now()
 
@@ -93,23 +33,23 @@ func newResourceEventLegacy(operationType bizmodel.EventOperationType, resource 
 	var deletedAt *time.Time
 
 	switch operationType {
-	case bizmodel.OperationTypeCreated:
+	case internal.OperationTypeCreated:
 		createdAt = resource.CreatedAt
 		reportedTime = *createdAt
-	case bizmodel.OperationTypeUpdated:
+	case internal.OperationTypeUpdated:
 		updatedAt = resource.UpdatedAt
 		reportedTime = *updatedAt
-	case bizmodel.OperationTypeDeleted:
+	case internal.OperationTypeDeleted:
 		deletedAt = &now
 		reportedTime = *deletedAt
 	}
 
 	return &datamodel.ResourceEvent{
 		Specversion:     "1.0",
-		Type:            datamodel.MakeEventType(eventType, resource.ResourceType, string(operationType.OperationType())),
+		Type:            makeEventType(eventType, resource.ResourceType, string(operationType.OperationType())),
 		Source:          "", // TODO: inventory uri
 		Id:              eventId.String(),
-		Subject:         datamodel.MakeEventSubject(eventType, resource.ResourceType, resource.ID.String()),
+		Subject:         makeEventSubject(eventType, resource.ResourceType, resource.ID.String()),
 		Time:            reportedTime,
 		DataContentType: "application/json",
 		Data: datamodel.EventResourceData{
@@ -136,7 +76,7 @@ func newResourceEventLegacy(operationType bizmodel.EventOperationType, resource 
 	}, nil
 }
 
-func convertResourceToResourceEventLegacy(resource Resource, operationType bizmodel.EventOperationType) (internal.JsonObject, error) {
+func convertResourceToResourceEventLegacy(resource Resource, operationType internal.EventOperationType) (internal.JsonObject, error) {
 	payload := internal.JsonObject{}
 
 	resourceEvent, err := newResourceEventLegacy(operationType, &resource)
@@ -228,7 +168,7 @@ func convertResourceToUnsetTupleEventLegacy(resource Resource, namespace string)
 	return payload, nil
 }
 
-func NewOutboxEventsFromResource(resource Resource, namespace string, operationType bizmodel.EventOperationType, txid string) (*datamodel.OutboxEvent, *datamodel.OutboxEvent, error) {
+func NewOutboxEventsFromResource(resource Resource, namespace string, operationType internal.EventOperationType, txid string) (*datamodel.OutboxEvent, *datamodel.OutboxEvent, error) {
 	var tuplePayload internal.JsonObject
 	var tupleEvent *datamodel.OutboxEvent
 
@@ -248,7 +188,7 @@ func NewOutboxEventsFromResource(resource Resource, namespace string, operationT
 
 	// Build tuple event
 	switch operationType.OperationType() {
-	case bizmodel.OperationTypeDeleted:
+	case internal.OperationTypeDeleted:
 		tuplePayload, err = convertResourceToUnsetTupleEventLegacy(resource, namespace)
 	default:
 		tuplePayload, err = convertResourceToSetTupleEventLegacy(resource, namespace)
@@ -267,4 +207,12 @@ func NewOutboxEventsFromResource(resource Resource, namespace string, operationT
 	}
 
 	return resourceEvent, tupleEvent, nil
+}
+
+func makeEventType(eventType, resourceType, operation string) string {
+	return fmt.Sprintf("redhat.inventory.%s.%s.%s", eventType, resourceType, operation)
+}
+
+func makeEventSubject(eventType, resourceType, resourceId string) string {
+	return "/" + strings.Join([]string{eventType, resourceType, resourceId}, "/")
 }

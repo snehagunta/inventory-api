@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/project-kessel/inventory-api/internal"
 	"gorm.io/gorm"
 
 	bizmodel "github.com/project-kessel/inventory-api/internal/biz/model"
@@ -53,7 +54,7 @@ func (f *fakeResourceRepository) NextReporterResourceId() (bizmodel.ReporterReso
 	return bizmodel.NewReporterResourceId(uuidV7)
 }
 
-func (f *fakeResourceRepository) Save(tx *gorm.DB, resource bizmodel.Resource, operationType bizmodel.EventOperationType, txid string) error {
+func (f *fakeResourceRepository) Save(tx *gorm.DB, resource bizmodel.Resource, operationType internal.EventOperationType, txid string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 

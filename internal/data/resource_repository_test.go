@@ -11,7 +11,6 @@ import (
 
 	"github.com/project-kessel/inventory-api/internal"
 	bizmodel "github.com/project-kessel/inventory-api/internal/biz/model"
-	"github.com/project-kessel/inventory-api/internal/biz/model_legacy"
 	datamodel "github.com/project-kessel/inventory-api/internal/data/model"
 )
 
@@ -88,7 +87,7 @@ func testRepositoryContract(t *testing.T, repo ResourceRepository, db *gorm.DB) 
 	t.Run("Save and FindResourceByKeys workflow", func(t *testing.T) {
 		resource := createTestResource(t)
 
-		err := repo.Save(db, resource, model_legacy.OperationTypeCreated, "test-tx-123")
+		err := repo.Save(db, resource, internal.OperationTypeCreated, "test-tx-123")
 		require.NoError(t, err)
 
 		key, err := bizmodel.NewReporterResourceKey(
@@ -124,10 +123,10 @@ func testRepositoryContract(t *testing.T, repo ResourceRepository, db *gorm.DB) 
 		resource1 := createTestResourceWithLocalId(t, "resource-1")
 		resource2 := createTestResourceWithLocalId(t, "resource-2")
 
-		err := repo.Save(db, resource1, model_legacy.OperationTypeCreated, "test-tx-1")
+		err := repo.Save(db, resource1, internal.OperationTypeCreated, "test-tx-1")
 		require.NoError(t, err)
 
-		err = repo.Save(db, resource2, model_legacy.OperationTypeCreated, "test-tx-2")
+		err = repo.Save(db, resource2, internal.OperationTypeCreated, "test-tx-2")
 		require.NoError(t, err)
 
 		key1, err := bizmodel.NewReporterResourceKey("resource-1", "k8s_cluster", "ocm", "ocm-instance-1")
@@ -156,10 +155,10 @@ func testRepositoryContract(t *testing.T, repo ResourceRepository, db *gorm.DB) 
 		resource1 := createTestResourceWithLocalId(t, "overwrite-test")
 		resource2 := createTestResourceWithLocalId(t, "overwrite-test")
 
-		err := repo.Save(db, resource1, model_legacy.OperationTypeCreated, "test-tx-1")
+		err := repo.Save(db, resource1, internal.OperationTypeCreated, "test-tx-1")
 		require.NoError(t, err)
 
-		err = repo.Save(db, resource2, model_legacy.OperationTypeUpdated, "test-tx-2")
+		err = repo.Save(db, resource2, internal.OperationTypeUpdated, "test-tx-2")
 		require.NoError(t, err)
 
 		key, err := bizmodel.NewReporterResourceKey("overwrite-test", "k8s_cluster", "ocm", "ocm-instance-1")
@@ -176,7 +175,7 @@ func testRepositoryContract(t *testing.T, repo ResourceRepository, db *gorm.DB) 
 		resource := createTestResource(t)
 
 		// First save the resource using a transaction
-		err := repo.Save(db, resource, model_legacy.OperationTypeCreated, "test-tx-1")
+		err := repo.Save(db, resource, internal.OperationTypeCreated, "test-tx-1")
 		require.NoError(t, err)
 
 		key, err := bizmodel.NewReporterResourceKey(

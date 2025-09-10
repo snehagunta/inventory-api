@@ -1,14 +1,11 @@
 package model
 
 import (
-	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/project-kessel/inventory-api/internal"
-	bizmodel "github.com/project-kessel/inventory-api/internal/biz/model"
 	"gorm.io/gorm"
 )
 
@@ -23,7 +20,7 @@ type OutboxEvent struct {
 	ID            uuid.UUID                   `gorm:"type:uuid;primarykey;not null"`
 	AggregateType AggregateType               `gorm:"column:aggregatetype;type:varchar(255);not null"`
 	AggregateID   string                      `gorm:"column:aggregateid;type:varchar(255);not null"`
-	Operation     bizmodel.EventOperationType `gorm:"type:varchar(255);not null"`
+	Operation     internal.EventOperationType `gorm:"type:varchar(255);not null"`
 	TxId          string                      `gorm:"column:txid;type:varchar(255)"`
 	Payload       internal.JsonObject
 }
@@ -101,130 +98,4 @@ type EventRelationshipReporter struct {
 	ObjectLocalResourceId  string `json:"object_local_resource_id"`
 	ReporterVersion        string `json:"reporter_version"`
 	ReporterInstanceId     string `json:"reporter_instance_id"`
-}
-
-func NewOutboxEventsFromResourceEvent(domainResourceEvent bizmodel.ResourceReportEvent, operationType bizmodel.EventOperationType, txid string) (*OutboxEvent, *OutboxEvent, error) {
-	var tuplePayload internal.JsonObject
-	var tupleEvent *OutboxEvent
-
-	// Build resource event
-	payload, err := convertResourceToResourceEvent(domainResourceEvent, operationType)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to convert resource to payload: %w", err)
-	}
-
-	resourceEvent := &OutboxEvent{
-		Operation:     operationType,
-		AggregateType: ResourceAggregateType,
-		AggregateID:   domainResourceEvent.Id().String(),
-		TxId:          "",
-		Payload:       payload,
-	}
-
-	// Build tuple event
-	/*switch operationType.OperationType() {
-	case OperationTypeDeleted:
-		tuplePayload, err = convertResourceToUnsetTupleEvent(domainResourceEvent)
-	default:
-		tuplePayload, err = convertResourceToSetTupleEvent(domainResourceEvent)
-	}*/
-
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to convert resource to payload: %w", err)
-	}
-
-	tupleEvent = &OutboxEvent{
-		Operation:     operationType,
-		AggregateType: TupleAggregateType,
-		AggregateID:   domainResourceEvent.Id().String(),
-		TxId:          txid,
-		Payload:       tuplePayload,
-	}
-
-	return resourceEvent, tupleEvent, nil
-}
-
-func convertResourceToResourceEvent(resourceReportEvent bizmodel.ResourceReportEvent, operationType bizmodel.EventOperationType) (internal.JsonObject, error) {
-	payload := internal.JsonObject{}
-
-	resourceEvent, err := newResourceEvent(operationType, &resourceReportEvent)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create resource event: %w", err)
-	}
-
-	marshalledJson, err := json.Marshal(resourceEvent)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal resource to json: %w", err)
-	}
-
-	err = json.Unmarshal(marshalledJson, &payload)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal json to payload: %w", err)
-	}
-
-	return payload, nil
-}
-
-func newResourceEvent(operationType bizmodel.EventOperationType, resourceEvent *bizmodel.ResourceReportEvent) (*ResourceEvent, error) {
-	const eventType = "resources"
-	now := time.Now()
-
-	eventId, err := uuid.NewUUID()
-	if err != nil {
-		return nil, err
-	}
-
-	var reportedTime time.Time
-	var createdAt *time.Time
-	var updatedAt *time.Time
-	var deletedAt *time.Time
-
-	switch operationType {
-	case bizmodel.OperationTypeCreated:
-		createdAt = resourceEvent.CreatedAt()
-		reportedTime = *createdAt
-	case bizmodel.OperationTypeUpdated:
-		updatedAt = resourceEvent.UpdatedAt()
-		reportedTime = *updatedAt
-	case bizmodel.OperationTypeDeleted:
-		deletedAt = &now
-		reportedTime = *deletedAt
-	}
-
-	return &ResourceEvent{
-		Specversion:     "1.0",
-		Type:            MakeEventType(eventType, resourceEvent.ResourceType(), string(operationType.OperationType())),
-		Source:          "", // TODO: inventory uri
-		Id:              eventId.String(),
-		Subject:         MakeEventSubject(eventType, resourceEvent.ResourceType(), resourceEvent.Id().String()),
-		Time:            reportedTime,
-		DataContentType: "application/json",
-		Data: EventResourceData{
-			Metadata: EventResourceMetadata{
-				Id:           resourceEvent.Id().String(),
-				ResourceType: resourceEvent.ResourceType(),
-				CreatedAt:    createdAt,
-				UpdatedAt:    updatedAt,
-				DeletedAt:    deletedAt,
-				WorkspaceId:  resourceEvent.WorkspaceId(),
-			},
-			ReporterData: EventResourceReporter{
-				ReporterInstanceId: resourceEvent.ReporterInstanceId(),
-				ReporterType:       resourceEvent.ReporterType(),
-				ConsoleHref:        resourceEvent.ConsoleHref(),
-				ApiHref:            resourceEvent.ApiHref(),
-				LocalResourceId:    resourceEvent.LocalResourceId(),
-				ReporterVersion:    resourceEvent.ReporterVersion(), //nolint:staticcheck
-			},
-			ResourceData: resourceEvent.Data(),
-		},
-	}, nil
-}
-
-func MakeEventType(eventType, resourceType, operation string) string {
-	return fmt.Sprintf("redhat.inventory.%s.%s.%s", eventType, resourceType, operation)
-}
-
-func MakeEventSubject(eventType, resourceType, resourceId string) string {
-	return "/" + strings.Join([]string{eventType, resourceType, resourceId}, "/")
 }

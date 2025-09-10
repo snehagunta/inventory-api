@@ -18,6 +18,22 @@ func StringPtr(s string) *string {
 	return &s
 }
 
+// =============================================================================
+// Event Operation Types
+// =============================================================================
+
+type EventOperationType string
+
+const (
+	OperationTypeCreated EventOperationType = "created"
+	OperationTypeUpdated EventOperationType = "updated"
+	OperationTypeDeleted EventOperationType = "deleted"
+)
+
+func (e EventOperationType) OperationType() EventOperationType {
+	return e
+}
+
 type JsonObject map[string]interface{}
 
 // GORM interface methods for JsonObject
