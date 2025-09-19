@@ -1,3 +1,5 @@
+//go:build enable_e2e_tests
+
 package grpc
 
 import (
