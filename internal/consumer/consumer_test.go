@@ -372,6 +372,72 @@ func TestInventoryConsumer_ProcessMessage(t *testing.T) {
 	}
 }
 
+func TestProcessMessage_Create_NoTuples_NoAuthzCalls(t *testing.T) {
+	tester := TestCase{}
+	errs := tester.TestSetup(t)
+	assert.Nil(t, errs)
+
+	// Force SchemaService to return no tuples by making current == previous workspace IDs
+	fakeRepo := data.NewFakeResourceRepositoryWithWorkspaceOverrides("same-workspace", "same-workspace")
+	tester.inv.SchemaService = usecase_resources.NewSchemaUsecase(fakeRepo, tester.logger)
+
+	// Spy authorizer to ensure no Create/Delete calls are made
+	authorizerSpy := &mocks.MockAuthz{}
+	tester.inv.Authorizer = authorizerSpy
+
+	msg := &kafka.Message{
+		Key:   []byte(testMessageKey),
+		Value: []byte(testCreateOrUpdateMessage),
+		Headers: []kafka.Header{
+			{Key: "operation", Value: []byte(string(biz.OperationTypeCreated))},
+			{Key: "txid", Value: []byte("123456")},
+		},
+	}
+
+	headers, err := ParseHeaders(msg)
+	require.NoError(t, err)
+
+	resp, err := tester.inv.ProcessMessage(headers, true, msg)
+	assert.NoError(t, err)
+	assert.Equal(t, "", resp)
+
+	authorizerSpy.AssertNotCalled(t, "CreateTuples", mock.Anything, mock.Anything)
+	authorizerSpy.AssertNotCalled(t, "DeleteTuples", mock.Anything, mock.Anything)
+}
+
+func TestProcessMessage_Update_NoTuples_NoAuthzCalls(t *testing.T) {
+	tester := TestCase{}
+	errs := tester.TestSetup(t)
+	assert.Nil(t, errs)
+
+	// Force SchemaService to return no tuples by making current == previous workspace IDs
+	fakeRepo := data.NewFakeResourceRepositoryWithWorkspaceOverrides("same-workspace", "same-workspace")
+	tester.inv.SchemaService = usecase_resources.NewSchemaUsecase(fakeRepo, tester.logger)
+
+	// Spy authorizer to ensure no Create/Delete calls are made
+	authorizerSpy := &mocks.MockAuthz{}
+	tester.inv.Authorizer = authorizerSpy
+
+	msg := &kafka.Message{
+		Key:   []byte(testMessageKey),
+		Value: []byte(testCreateOrUpdateMessage),
+		Headers: []kafka.Header{
+			{Key: "operation", Value: []byte(string(biz.OperationTypeUpdated))},
+			{Key: "txid", Value: []byte("123456")},
+		},
+	}
+
+	headers, err := ParseHeaders(msg)
+	require.NoError(t, err)
+
+	resp, err := tester.inv.ProcessMessage(headers, true, msg)
+	assert.NoError(t, err)
+	assert.Equal(t, "", resp)
+
+	authorizerSpy.AssertNotCalled(t, "CreateTuples", mock.Anything, mock.Anything)
+	authorizerSpy.AssertNotCalled(t, "DeleteTuples", mock.Anything, mock.Anything)
+}
+
 func TestCheckIfCommit(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -862,4 +928,39 @@ func TestInventoryConsumer_DeleteTuple_FailedPrecondition(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid fencing token")
 
 	authorizer.AssertExpectations(t)
+}
+
+func TestProcessMessage_Delete_NoTuples_NoAuthzCalls(t *testing.T) {
+	tester := TestCase{}
+	errs := tester.TestSetup(t)
+	assert.Nil(t, errs)
+
+	// Force SchemaService delete path to yield no tuples by having latest workspace empty
+	fakeRepo := data.NewFakeResourceRepositoryWithEmptyLatest()
+	tester.inv.SchemaService = usecase_resources.NewSchemaUsecase(fakeRepo, tester.logger)
+
+	// Spy authorizer to ensure no DeleteTuples calls are made
+	authorizerSpy := &mocks.MockAuthz{}
+	tester.inv.Authorizer = authorizerSpy
+
+	msg := &kafka.Message{
+		Key:   []byte(testMessageKey),
+		Value: []byte(testDeleteMessage),
+		Headers: []kafka.Header{
+			{Key: "operation", Value: []byte(string(biz.OperationTypeDeleted))},
+			{Key: "txid", Value: []byte{}},
+		},
+	}
+
+	headers, err := ParseHeaders(msg)
+	require.NoError(t, err)
+
+	resp, err := tester.inv.ProcessMessage(headers, true, msg)
+	// With empty latest workspace, CalculateTuples returns an error which causes retries and ErrMaxRetries
+	assert.Error(t, err)
+	assert.Equal(t, ErrMaxRetries, err)
+	assert.Equal(t, "", resp)
+
+	authorizerSpy.AssertNotCalled(t, "DeleteTuples", mock.Anything, mock.Anything)
+	authorizerSpy.AssertNotCalled(t, "CreateTuples", mock.Anything, mock.Anything)
 }

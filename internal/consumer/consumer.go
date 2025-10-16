@@ -321,6 +321,9 @@ func (i *InventoryConsumer) ProcessMessage(headers map[string]string, relationsE
 				if err != nil {
 					return "", err
 				}
+				if !tuplesToReplicate.HasTuplesToCreate() {
+					return "", nil
+				}
 				return i.CreateTuple(context.Background(), tuplesToReplicate.TuplesToCreate())
 			}, i.MetricsCollector.MsgProcessFailures)
 			if err != nil {
@@ -345,6 +348,9 @@ func (i *InventoryConsumer) ProcessMessage(headers map[string]string, relationsE
 				tuplesToReplicate, err := i.SchemaService.CalculateTuples(*tupleEvent, biz.OperationTypeUpdated)
 				if err != nil {
 					return "", err
+				}
+				if !tuplesToReplicate.HasTuplesToCreate() && !tuplesToReplicate.HasTuplesToDelete() {
+					return "", nil
 				}
 				return i.UpdateTuple(context.Background(), tuplesToReplicate.TuplesToCreate(), tuplesToReplicate.TuplesToDelete())
 			}, i.MetricsCollector.MsgProcessFailures)

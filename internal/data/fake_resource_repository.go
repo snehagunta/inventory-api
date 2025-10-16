@@ -21,6 +21,7 @@ type fakeResourceRepository struct {
 	overrideCurrent         string                        // test override for current workspace ID
 	overridePrevious        string                        // test override for previous workspace ID
 	processedTransactionIds map[string]bool               // track processed transaction IDs for idempotency testing
+	forceEmptyLatest        bool                          // when true, FindLatestRepresentations returns empty workspace id
 }
 
 type storedResource struct {
@@ -44,6 +45,7 @@ func NewFakeResourceRepository() ResourceRepository {
 		overrideCurrent:         "",
 		overridePrevious:        "",
 		processedTransactionIds: make(map[string]bool),
+		forceEmptyLatest:        false,
 	}
 }
 
@@ -56,6 +58,20 @@ func NewFakeResourceRepositoryWithWorkspaceOverrides(current, previous string) R
 		resources:               make(map[string]*storedResource),
 		overrideCurrent:         current,
 		overridePrevious:        previous,
+		forceEmptyLatest:        false,
+	}
+}
+
+// NewFakeResourceRepositoryWithEmptyLatest forces FindLatestRepresentations to return an empty workspace id
+func NewFakeResourceRepositoryWithEmptyLatest() ResourceRepository {
+	return &fakeResourceRepository{
+		resourcesByPrimaryKey:   make(map[uuid.UUID]*storedResource),
+		resourcesByCompositeKey: make(map[string]uuid.UUID),
+		resources:               make(map[string]*storedResource),
+		overrideCurrent:         "",
+		overridePrevious:        "",
+		processedTransactionIds: make(map[string]bool),
+		forceEmptyLatest:        true,
 	}
 }
 
@@ -258,6 +274,11 @@ func (f *fakeResourceRepository) FindCurrentAndPreviousVersionedRepresentations(
 }
 
 func (f *fakeResourceRepository) FindLatestRepresentations(tx *gorm.DB, key bizmodel.ReporterResourceKey) (RepresentationsByVersion, error) {
+	if f.forceEmptyLatest {
+		return RepresentationsByVersion{
+			Data: map[string]interface{}{"workspace_id": ""}, Version: 1,
+		}, nil
+	}
 	if f.overrideCurrent != "" {
 		return RepresentationsByVersion{
 			Data: map[string]interface{}{"workspace_id": f.overrideCurrent}, Version: 1,
