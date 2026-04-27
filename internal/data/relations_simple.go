@@ -8,10 +8,14 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/project-kessel/inventory-api/internal/biz/model"
+	kesselv1 "github.com/project-kessel/relations-api/api/kessel/relations/v1"
+	kessel "github.com/project-kessel/relations-api/api/kessel/relations/v1beta1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 )
 
 // simpleTupleKey represents a unique relationship tuple for lookup.
+// This mirrors the structure of kessel.Relationship but as a comparable key.
 type simpleTupleKey struct {
 	ResourceNamespace string
 	ResourceType      string
@@ -51,8 +55,6 @@ type SimpleRelationsRepository struct {
 	locks             map[string]string                 // lockId -> token
 }
 
-var _ model.RelationsRepository = &SimpleRelationsRepository{}
-
 // NewSimpleRelationsRepository creates a SimpleRelationsRepository with no tuples at version 1.
 func NewSimpleRelationsRepository() *SimpleRelationsRepository {
 	return &SimpleRelationsRepository{
@@ -71,17 +73,20 @@ func (s *SimpleRelationsRepository) Version() int64 {
 }
 
 // RetainCurrentSnapshot saves the current tuple state as a retained snapshot.
+// This allows tests to verify consistency token behavior by making changes
+// after retaining a snapshot, then checking with the old token.
 func (s *SimpleRelationsRepository) RetainCurrentSnapshot() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Copy current tuples to snapshot
 	snapshot := make(map[simpleTupleKey]bool, len(s.tuples))
 	maps.Copy(snapshot, s.tuples)
 	s.snapshots[s.version] = snapshot
 	return s.version
 }
 
-// ReleaseSnapshot removes a retained snapshot.
+// ReleaseSnapshot removes a retained snapshot, allowing it to be garbage collected.
 func (s *SimpleRelationsRepository) ReleaseSnapshot(version int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -95,11 +100,19 @@ func (s *SimpleRelationsRepository) ClearSnapshots() {
 	s.snapshots = make(map[int64]map[simpleTupleKey]bool)
 }
 
+// advanceVersion increments the version counter. Must be called with lock held.
 func (s *SimpleRelationsRepository) advanceVersion() {
 	s.version++
 }
 
+// getTuplesForToken returns the appropriate tuple map for the given consistency token.
+// Returns the oldest available snapshot with version >= the requested token.
+// Available snapshots include retained snapshots and the current state.
+// When no token is provided (empty string) or token is invalid, treats it as 0,
+// which means "use the oldest available snapshot".
+// When no snapshots are retained, the current state is the only available one.
 func (s *SimpleRelationsRepository) getTuplesForToken(token string) map[simpleTupleKey]bool {
+	// Parse token, default to 0 (oldest available)
 	var requested int64 = 0
 	if token != "" {
 		if parsed, err := simpleParseConsistencyToken(token); err == nil {
@@ -107,6 +120,7 @@ func (s *SimpleRelationsRepository) getTuplesForToken(token string) map[simpleTu
 		}
 	}
 
+	// Collect all available versions (snapshots + current)
 	versions := make([]int64, 0, len(s.snapshots)+1)
 	for v := range s.snapshots {
 		versions = append(versions, v)
@@ -114,6 +128,7 @@ func (s *SimpleRelationsRepository) getTuplesForToken(token string) map[simpleTu
 	versions = append(versions, s.version)
 	slices.Sort(versions)
 
+	// Find the minimum version >= requested
 	idx, _ := slices.BinarySearch(versions, requested)
 	if idx < len(versions) {
 		v := versions[idx]
@@ -126,15 +141,19 @@ func (s *SimpleRelationsRepository) getTuplesForToken(token string) map[simpleTu
 	return s.tuples
 }
 
+// simpleFormatConsistencyToken formats a version as a consistency token string.
 func simpleFormatConsistencyToken(version int64) string {
 	return strconv.FormatInt(version, 10)
 }
 
+// simpleParseConsistencyToken parses a consistency token string into a version number.
 func simpleParseConsistencyToken(token string) (int64, error) {
 	return strconv.ParseInt(token, 10, 64)
 }
 
 // Grant is a convenience method for tests to add a direct permission tuple.
+// It creates a tuple: (namespace/resourceType:resourceID)#relation@(rbac/principal:subjectID)
+// This advances the version counter.
 func (s *SimpleRelationsRepository) Grant(subjectID, relation, namespace, resourceType, resourceID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -150,7 +169,7 @@ func (s *SimpleRelationsRepository) Grant(subjectID, relation, namespace, resour
 	s.advanceVersion()
 }
 
-// Reset restores the repository to its initial state.
+// Reset restores the repository to its initial state (equivalent to NewSimpleRelationsRepository).
 func (s *SimpleRelationsRepository) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -164,6 +183,7 @@ func (s *SimpleRelationsRepository) Reset() {
 	s.acquireLockError = nil
 }
 
+// simpleHasTupleInSnapshot checks if a tuple exists in the given tuple map.
 func simpleHasTupleInSnapshot(tuples map[simpleTupleKey]bool, resourceNamespace, resourceType, resourceID, relation, subjectNamespace, subjectType, subjectID string) bool {
 	key := simpleTupleKey{
 		ResourceNamespace: resourceNamespace,
@@ -177,26 +197,29 @@ func simpleHasTupleInSnapshot(tuples map[simpleTupleKey]bool, resourceNamespace,
 	return tuples[key]
 }
 
-func simpleTupleKeyFromModelTuple(tuple model.RelationsTuple) simpleTupleKey {
-	obj := tuple.Object()
-	sub := tuple.Subject().Resource()
-	key := simpleTupleKey{
-		ResourceType: obj.ResourceType().Serialize(),
-		ResourceID:   obj.ResourceId().Serialize(),
-		Relation:     tuple.Relation().Serialize(),
-		SubjectType:  sub.ResourceType().Serialize(),
-		SubjectID:    sub.ResourceId().Serialize(),
+func simpleTupleKeyFromRelationship(rel *kessel.Relationship) simpleTupleKey {
+	key := simpleTupleKey{}
+	if rel.Resource != nil {
+		key.ResourceID = rel.Resource.Id
+		if rel.Resource.Type != nil {
+			key.ResourceNamespace = rel.Resource.Type.Namespace
+			key.ResourceType = rel.Resource.Type.Name
+		}
 	}
-	if obj.HasReporter() {
-		key.ResourceNamespace = obj.Reporter().ReporterType().Serialize()
-	}
-	if sub.HasReporter() {
-		key.SubjectNamespace = sub.Reporter().ReporterType().Serialize()
+	key.Relation = rel.Relation
+	if rel.Subject != nil && rel.Subject.Subject != nil {
+		key.SubjectID = rel.Subject.Subject.Id
+		if rel.Subject.Subject.Type != nil {
+			key.SubjectNamespace = rel.Subject.Subject.Type.Namespace
+			key.SubjectType = rel.Subject.Subject.Type.Name
+		}
 	}
 	return key
 }
 
 // SetHealthError configures the error returned by Health().
+// Pass nil to simulate healthy state (default).
+// This allows tests to simulate Relations API failures.
 func (s *SimpleRelationsRepository) SetHealthError(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -204,6 +227,7 @@ func (s *SimpleRelationsRepository) SetHealthError(err error) {
 }
 
 // SetCreateTuplesError configures the error that CreateTuples() will return.
+// This allows tests to simulate CreateTuples failures.
 func (s *SimpleRelationsRepository) SetCreateTuplesError(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -211,6 +235,7 @@ func (s *SimpleRelationsRepository) SetCreateTuplesError(err error) {
 }
 
 // SetDeleteTuplesError configures the error that DeleteTuples() will return.
+// This allows tests to simulate DeleteTuples failures.
 func (s *SimpleRelationsRepository) SetDeleteTuplesError(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -218,361 +243,561 @@ func (s *SimpleRelationsRepository) SetDeleteTuplesError(err error) {
 }
 
 // SetAcquireLockError configures the error that AcquireLock() will return.
+// This allows tests to simulate AcquireLock failures.
 func (s *SimpleRelationsRepository) SetAcquireLockError(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.acquireLockError = err
 }
 
-func (s *SimpleRelationsRepository) Health(_ context.Context) (model.HealthResult, error) {
+// Health implements RelationsRepository.
+// Returns the configured health error if set via SetHealthError, otherwise returns healthy response.
+func (s *SimpleRelationsRepository) Health(_ context.Context) (*kesselv1.GetReadyzResponse, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	if s.healthError != nil {
-		return model.HealthResult{}, s.healthError
+		return nil, s.healthError
 	}
-	return model.NewHealthResult("OK", 200), nil
+	return &kesselv1.GetReadyzResponse{Status: "OK"}, nil
 }
 
-func simpleResourceRefFields(ref model.ResourceReference) (namespace, resType, resID string) {
-	resType = ref.ResourceType().Serialize()
-	resID = ref.ResourceId().Serialize()
-	if ref.HasReporter() {
-		namespace = ref.Reporter().ReporterType().Serialize()
-	}
-	return
-}
-
-func (s *SimpleRelationsRepository) Check(_ context.Context, rel model.Relationship, consistency model.Consistency,
-) (model.CheckResult, error) {
+// Check implements RelationsRepository.
+// The consistencyToken parameter (third argument) specifies the minimum freshness required.
+func (s *SimpleRelationsRepository) Check(_ context.Context, namespace, permission, consistencyToken, resourceType, localResourceID string, sub *kessel.SubjectReference) (kessel.CheckResponse_Allowed, *kessel.ConsistencyToken, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	consistencyToken := consistencyToSimpleToken(consistency)
+	subjectNamespace := ""
+	subjectType := ""
+	subjectID := ""
+	if sub != nil && sub.Subject != nil {
+		subjectID = sub.Subject.Id
+		if sub.Subject.Type != nil {
+			subjectNamespace = sub.Subject.Type.Namespace
+			subjectType = sub.Subject.Type.Name
+		}
+	}
+
 	tuples := s.getTuplesForToken(consistencyToken)
-	resultToken := model.DeserializeConsistencyToken(simpleFormatConsistencyToken(s.version))
+	resultToken := simpleFormatConsistencyToken(s.version)
 
-	objNs, objType, objId := simpleResourceRefFields(rel.Object())
-	subResource := rel.Subject().Resource()
-	subNs, subType, subId := simpleResourceRefFields(subResource)
-
-	allowed := simpleHasTupleInSnapshot(tuples, objNs, objType, objId,
-		rel.Relation().Serialize(), subNs, subType, subId)
-
-	return model.NewCheckResult(allowed, resultToken), nil
+	if simpleHasTupleInSnapshot(tuples, namespace, resourceType, localResourceID, permission, subjectNamespace, subjectType, subjectID) {
+		return kessel.CheckResponse_ALLOWED_TRUE, &kessel.ConsistencyToken{Token: resultToken}, nil
+	}
+	return kessel.CheckResponse_ALLOWED_FALSE, &kessel.ConsistencyToken{Token: resultToken}, nil
 }
 
-func (s *SimpleRelationsRepository) CheckForUpdate(_ context.Context, rel model.Relationship,
-) (model.CheckResult, error) {
+// CheckForUpdate implements RelationsRepository.
+// Always uses the latest state (no stale reads for update checks).
+func (s *SimpleRelationsRepository) CheckForUpdate(_ context.Context, namespace, permission, resourceType, localResourceID string, sub *kessel.SubjectReference) (kessel.CheckForUpdateResponse_Allowed, *kessel.ConsistencyToken, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	resultToken := model.DeserializeConsistencyToken(simpleFormatConsistencyToken(s.version))
+	subjectNamespace := ""
+	subjectType := ""
+	subjectID := ""
+	if sub != nil && sub.Subject != nil {
+		subjectID = sub.Subject.Id
+		if sub.Subject.Type != nil {
+			subjectNamespace = sub.Subject.Type.Namespace
+			subjectType = sub.Subject.Type.Name
+		}
+	}
 
-	objNs, objType, objId := simpleResourceRefFields(rel.Object())
-	subResource := rel.Subject().Resource()
-	subNs, subType, subId := simpleResourceRefFields(subResource)
+	resultToken := simpleFormatConsistencyToken(s.version)
 
-	allowed := simpleHasTupleInSnapshot(s.tuples, objNs, objType, objId,
-		rel.Relation().Serialize(), subNs, subType, subId)
-
-	return model.NewCheckResult(allowed, resultToken), nil
+	if simpleHasTupleInSnapshot(s.tuples, namespace, resourceType, localResourceID, permission, subjectNamespace, subjectType, subjectID) {
+		return kessel.CheckForUpdateResponse_ALLOWED_TRUE, &kessel.ConsistencyToken{Token: resultToken}, nil
+	}
+	return kessel.CheckForUpdateResponse_ALLOWED_FALSE, &kessel.ConsistencyToken{Token: resultToken}, nil
 }
 
-func (s *SimpleRelationsRepository) CheckBulk(_ context.Context, rels []model.Relationship, consistency model.Consistency,
-) (model.CheckBulkResult, error) {
+// CheckBulk implements RelationsRepository.
+// Respects the consistency token in the request if provided.
+func (s *SimpleRelationsRepository) CheckBulk(_ context.Context, req *kessel.CheckBulkRequest) (*kessel.CheckBulkResponse, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	consistencyToken := consistencyToSimpleToken(consistency)
+	consistencyToken := ""
+	if req.Consistency != nil {
+		if atLeastAsFresh := req.Consistency.GetAtLeastAsFresh(); atLeastAsFresh != nil {
+			consistencyToken = atLeastAsFresh.GetToken()
+		}
+	}
+
 	tuples := s.getTuplesForToken(consistencyToken)
-	resultToken := model.DeserializeConsistencyToken(simpleFormatConsistencyToken(s.version))
+	resultToken := simpleFormatConsistencyToken(s.version)
 
-	pairs := make([]model.CheckBulkResultPair, len(rels))
-	for i, rel := range rels {
-		objNs, objType, objId := simpleResourceRefFields(rel.Object())
-		subResource := rel.Subject().Resource()
-		subNs, subType, subId := simpleResourceRefFields(subResource)
+	pairs := make([]*kessel.CheckBulkResponsePair, len(req.GetItems()))
+	for i, item := range req.GetItems() {
+		subjectNamespace := ""
+		subjectType := ""
+		subjectID := ""
+		if item.Subject != nil && item.Subject.Subject != nil {
+			subjectID = item.Subject.Subject.Id
+			if item.Subject.Subject.Type != nil {
+				subjectNamespace = item.Subject.Subject.Type.Namespace
+				subjectType = item.Subject.Subject.Type.Name
+			}
+		}
 
-		allowed := simpleHasTupleInSnapshot(tuples, objNs, objType, objId,
-			rel.Relation().Serialize(), subNs, subType, subId)
+		resourceNamespace := ""
+		resourceType := ""
+		resourceID := ""
+		if item.Resource != nil {
+			resourceID = item.Resource.Id
+			if item.Resource.Type != nil {
+				resourceNamespace = item.Resource.Type.Namespace
+				resourceType = item.Resource.Type.Name
+			}
+		}
 
-		pairs[i] = model.NewCheckBulkResultPair(rel, model.NewCheckBulkResultItem(allowed, nil, 0))
+		allowed := kessel.CheckBulkResponseItem_ALLOWED_FALSE
+		if simpleHasTupleInSnapshot(tuples, resourceNamespace, resourceType, resourceID, item.Relation, subjectNamespace, subjectType, subjectID) {
+			allowed = kessel.CheckBulkResponseItem_ALLOWED_TRUE
+		}
+
+		pairs[i] = &kessel.CheckBulkResponsePair{
+			Request: item,
+			Response: &kessel.CheckBulkResponsePair_Item{
+				Item: &kessel.CheckBulkResponseItem{
+					Allowed: allowed,
+				},
+			},
+		}
 	}
 
-	return model.NewCheckBulkResult(pairs, resultToken), nil
+	return &kessel.CheckBulkResponse{
+		Pairs:            pairs,
+		ConsistencyToken: &kessel.ConsistencyToken{Token: resultToken},
+	}, nil
 }
 
-func (s *SimpleRelationsRepository) CheckForUpdateBulk(_ context.Context, rels []model.Relationship,
-) (model.CheckBulkResult, error) {
+// CheckForUpdateBulk implements RelationsRepository by checking each item against current tuples.
+func (s *SimpleRelationsRepository) CheckForUpdateBulk(ctx context.Context, req *kessel.CheckForUpdateBulkRequest) (*kessel.CheckForUpdateBulkResponse, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	tuples := s.tuples
+	resultToken := simpleFormatConsistencyToken(s.version)
+
+	pairs := make([]*kessel.CheckBulkResponsePair, len(req.GetItems()))
+	for i, item := range req.GetItems() {
+		subjectNamespace := ""
+		subjectType := ""
+		subjectID := ""
+		if item.Subject != nil && item.Subject.Subject != nil {
+			subjectID = item.Subject.Subject.Id
+			if item.Subject.Subject.Type != nil {
+				subjectNamespace = item.Subject.Subject.Type.Namespace
+				subjectType = item.Subject.Subject.Type.Name
+			}
+		}
+		resourceNamespace := ""
+		resourceType := ""
+		resourceID := ""
+		if item.Resource != nil {
+			resourceID = item.Resource.Id
+			if item.Resource.Type != nil {
+				resourceNamespace = item.Resource.Type.Namespace
+				resourceType = item.Resource.Type.Name
+			}
+		}
+		allowed := kessel.CheckBulkResponseItem_ALLOWED_FALSE
+		if simpleHasTupleInSnapshot(tuples, resourceNamespace, resourceType, resourceID, item.Relation, subjectNamespace, subjectType, subjectID) {
+			allowed = kessel.CheckBulkResponseItem_ALLOWED_TRUE
+		}
+		pairs[i] = &kessel.CheckBulkResponsePair{
+			Request: item,
+			Response: &kessel.CheckBulkResponsePair_Item{
+				Item: &kessel.CheckBulkResponseItem{Allowed: allowed},
+			},
+		}
+	}
+	return &kessel.CheckForUpdateBulkResponse{
+		Pairs:            pairs,
+		ConsistencyToken: &kessel.ConsistencyToken{Token: resultToken},
+	}, nil
+}
+
+// LookupResources implements RelationsRepository.
+// It returns resources where the subject has the specified relation.
+// This is a simple direct-tuple lookup, not a full ReBAC graph traversal.
+func (s *SimpleRelationsRepository) LookupResources(_ context.Context, req *kessel.LookupResourcesRequest) (grpc.ServerStreamingClient[kessel.LookupResourcesResponse], error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	resultToken := model.DeserializeConsistencyToken(simpleFormatConsistencyToken(s.version))
-
-	pairs := make([]model.CheckBulkResultPair, len(rels))
-	for i, rel := range rels {
-		objNs, objType, objId := simpleResourceRefFields(rel.Object())
-		subResource := rel.Subject().Resource()
-		subNs, subType, subId := simpleResourceRefFields(subResource)
-
-		allowed := simpleHasTupleInSnapshot(s.tuples, objNs, objType, objId,
-			rel.Relation().Serialize(), subNs, subType, subId)
-
-		pairs[i] = model.NewCheckBulkResultPair(rel, model.NewCheckBulkResultItem(allowed, nil, 0))
-	}
-
-	return model.NewCheckBulkResult(pairs, resultToken), nil
-}
-
-func (s *SimpleRelationsRepository) LookupObjects(_ context.Context,
-	objectType model.RepresentationType,
-	relation model.Relation, subject model.SubjectReference,
-	_ *model.Pagination, _ model.Consistency,
-) (model.ResultStream[model.LookupObjectsItem], error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	requestedType := objectType.ResourceType().Serialize()
 	requestedNamespace := ""
-	if objectType.HasReporterType() {
-		requestedNamespace = objectType.ReporterType().Serialize()
+	requestedType := ""
+	if req.ResourceType != nil {
+		requestedNamespace = req.ResourceType.Namespace
+		requestedType = req.ResourceType.Name
 	}
-	requestedRelation := relation.Serialize()
+	requestedRelation := req.Relation
 
-	subResource := subject.Resource()
-	subNs, subType, subId := simpleResourceRefFields(subResource)
+	subjectNamespace := ""
+	subjectType := ""
+	subjectID := ""
+	if req.Subject != nil && req.Subject.Subject != nil {
+		subjectID = req.Subject.Subject.Id
+		if req.Subject.Subject.Type != nil {
+			subjectNamespace = req.Subject.Subject.Type.Namespace
+			subjectType = req.Subject.Subject.Type.Name
+		}
+	}
 
-	var results []model.LookupObjectsItem
+	var results []*kessel.LookupResourcesResponse
 	for key := range s.tuples {
 		namespaceMatches := requestedNamespace == "" || key.ResourceNamespace == requestedNamespace
 		typeMatches := requestedType == "" || key.ResourceType == requestedType
 		relationMatches := key.Relation == requestedRelation
-		subjectMatches := key.SubjectNamespace == subNs &&
-			key.SubjectType == subType &&
-			key.SubjectID == subId
+		subjectMatches := key.SubjectNamespace == subjectNamespace &&
+			key.SubjectType == subjectType &&
+			key.SubjectID == subjectID
 
 		if namespaceMatches && typeMatches && relationMatches && subjectMatches {
-			reporterType := model.DeserializeReporterType(key.ResourceNamespace)
-			reporter := model.NewReporterReference(reporterType, nil)
-			results = append(results, model.NewLookupObjectsItem(
-				model.NewResourceReference(
-					model.DeserializeResourceType(key.ResourceType),
-					model.DeserializeLocalResourceId(key.ResourceID),
-					&reporter,
-				), "",
-			))
+			results = append(results, &kessel.LookupResourcesResponse{
+				Resource: &kessel.ObjectReference{
+					Type: &kessel.ObjectType{
+						Namespace: key.ResourceNamespace,
+						Name:      key.ResourceType,
+					},
+					Id: key.ResourceID,
+				},
+				Pagination: &kessel.ResponsePagination{},
+			})
 		}
 	}
 
-	return &simpleLookupObjectsStream{results: results}, nil
+	return &simpleLookupResourcesStream{results: results}, nil
 }
 
-func (s *SimpleRelationsRepository) LookupSubjects(_ context.Context,
-	object model.ResourceReference, relation model.Relation,
-	subjectType model.RepresentationType,
-	_ *model.Relation,
-	_ *model.Pagination, _ model.Consistency,
-) (model.ResultStream[model.LookupSubjectsItem], error) {
+// LookupSubjects implements RelationsRepository.
+// It returns subjects that have the specified relation to a resource.
+// This is a simple direct-tuple lookup, not a full ReBAC graph traversal.
+func (s *SimpleRelationsRepository) LookupSubjects(_ context.Context, req *kessel.LookupSubjectsRequest) (grpc.ServerStreamingClient[kessel.LookupSubjectsResponse], error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	objNs, objType, objId := simpleResourceRefFields(object)
-	requestedRelation := relation.Serialize()
+	resourceNamespace := ""
+	resourceType := ""
+	resourceID := ""
+	if req.Resource != nil {
+		resourceID = req.Resource.Id
+		if req.Resource.Type != nil {
+			resourceNamespace = req.Resource.Type.Namespace
+			resourceType = req.Resource.Type.Name
+		}
+	}
+	requestedRelation := req.Relation
 
-	wantSubjectType := subjectType.ResourceType().Serialize()
-	wantSubjectNamespace := ""
-	if subjectType.HasReporterType() {
-		wantSubjectNamespace = subjectType.ReporterType().Serialize()
+	subjectNamespace := ""
+	subjectType := ""
+	if req.SubjectType != nil {
+		subjectNamespace = req.SubjectType.Namespace
+		subjectType = req.SubjectType.Name
 	}
 
-	var results []model.LookupSubjectsItem
+	var results []*kessel.LookupSubjectsResponse
 	for key := range s.tuples {
-		resourceMatches := key.ResourceNamespace == objNs &&
-			key.ResourceType == objType &&
-			key.ResourceID == objId
+		resourceMatches := key.ResourceNamespace == resourceNamespace &&
+			key.ResourceType == resourceType &&
+			key.ResourceID == resourceID
 		relationMatches := key.Relation == requestedRelation
-		subjectTypeMatches := (wantSubjectNamespace == "" || key.SubjectNamespace == wantSubjectNamespace) &&
-			(wantSubjectType == "" || key.SubjectType == wantSubjectType)
+		subjectTypeMatches := (subjectNamespace == "" || key.SubjectNamespace == subjectNamespace) &&
+			(subjectType == "" || key.SubjectType == subjectType)
 
 		if resourceMatches && relationMatches && subjectTypeMatches {
-			reporterType := model.DeserializeReporterType(key.SubjectNamespace)
-			reporter := model.NewReporterReference(reporterType, nil)
-			subResource := model.NewResourceReference(
-				model.DeserializeResourceType(key.SubjectType),
-				model.DeserializeLocalResourceId(key.SubjectID),
-				&reporter,
-			)
-			results = append(results, model.NewLookupSubjectsItem(
-				model.NewSubjectReferenceWithoutRelation(subResource), "",
-			))
+			results = append(results, &kessel.LookupSubjectsResponse{
+				Subject: &kessel.SubjectReference{
+					Subject: &kessel.ObjectReference{
+						Type: &kessel.ObjectType{
+							Namespace: key.SubjectNamespace,
+							Name:      key.SubjectType,
+						},
+						Id: key.SubjectID,
+					},
+				},
+				Pagination: &kessel.ResponsePagination{},
+			})
 		}
 	}
 
 	return &simpleLookupSubjectsStream{results: results}, nil
 }
 
-func (s *SimpleRelationsRepository) CreateTuples(_ context.Context, tuples []model.RelationsTuple, _ bool, _ *model.FencingCheck,
-) (model.TuplesResult, error) {
+// CreateTuples implements RelationsRepository by storing the given tuples.
+// This advances the version counter.
+// Returns the configured error if set via SetCreateTuplesError.
+func (s *SimpleRelationsRepository) CreateTuples(_ context.Context, req *kessel.CreateTuplesRequest) (*kessel.CreateTuplesResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Return configured error if set
 	if s.createTuplesError != nil {
-		return model.TuplesResult{}, s.createTuplesError
+		return nil, s.createTuplesError
 	}
 
-	for _, tuple := range tuples {
-		key := simpleTupleKeyFromModelTuple(tuple)
+	for _, rel := range req.GetTuples() {
+		key := simpleTupleKeyFromRelationship(rel)
 		s.tuples[key] = true
 	}
 	s.advanceVersion()
 
-	return model.NewTuplesResult(model.DeserializeConsistencyToken(strconv.FormatInt(s.version, 10))), nil
+	return &kessel.CreateTuplesResponse{
+		ConsistencyToken: &kessel.ConsistencyToken{
+			Token: strconv.FormatInt(s.version, 10),
+		},
+	}, nil
 }
 
-func (s *SimpleRelationsRepository) DeleteTuples(_ context.Context, filter model.TupleFilter, _ *model.FencingCheck,
-) (model.TuplesResult, error) {
+// DeleteTuples implements RelationsRepository by removing tuples matching the filter.
+// This advances the version counter.
+// Returns the configured error if set via SetDeleteTuplesError.
+func (s *SimpleRelationsRepository) DeleteTuples(_ context.Context, req *kessel.DeleteTuplesRequest) (*kessel.DeleteTuplesResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Return configured error if set
 	if s.deleteTuplesError != nil {
-		return model.TuplesResult{}, s.deleteTuplesError
+		return nil, s.deleteTuplesError
+	}
+
+	filter := req.GetFilter()
+	if filter == nil {
+		s.advanceVersion()
+		return &kessel.DeleteTuplesResponse{
+			ConsistencyToken: &kessel.ConsistencyToken{
+				Token: strconv.FormatInt(s.version, 10),
+			},
+		}, nil
 	}
 
 	for key := range s.tuples {
-		if simpleMatchesTupleFilter(key, filter) {
+		if simpleMatchesFilter(key, filter) {
 			delete(s.tuples, key)
 		}
 	}
 	s.advanceVersion()
 
-	return model.NewTuplesResult(model.DeserializeConsistencyToken(strconv.FormatInt(s.version, 10))), nil
+	return &kessel.DeleteTuplesResponse{
+		ConsistencyToken: &kessel.ConsistencyToken{
+			Token: strconv.FormatInt(s.version, 10),
+		},
+	}, nil
 }
 
-func simpleMatchesTupleFilter(key simpleTupleKey, filter model.TupleFilter) bool {
-	if filter.ReporterType() != nil && filter.ReporterType().Serialize() != key.ResourceNamespace {
+func simpleMatchesFilter(key simpleTupleKey, filter *kessel.RelationTupleFilter) bool {
+	if filter.ResourceNamespace != nil && *filter.ResourceNamespace != key.ResourceNamespace {
 		return false
 	}
-	if filter.ObjectType() != nil && filter.ObjectType().Serialize() != key.ResourceType {
+	if filter.ResourceType != nil && *filter.ResourceType != key.ResourceType {
 		return false
 	}
-	if filter.ObjectId() != nil && filter.ObjectId().Serialize() != key.ResourceID {
+	if filter.ResourceId != nil && *filter.ResourceId != key.ResourceID {
 		return false
 	}
-	if filter.Relation() != nil && filter.Relation().Serialize() != key.Relation {
+	if filter.Relation != nil && *filter.Relation != key.Relation {
 		return false
 	}
-	if filter.Subject() != nil {
-		sf := filter.Subject()
-		if sf.ReporterType() != nil && sf.ReporterType().Serialize() != key.SubjectNamespace {
+	if filter.SubjectFilter != nil {
+		sf := filter.SubjectFilter
+		if sf.SubjectNamespace != nil && *sf.SubjectNamespace != key.SubjectNamespace {
 			return false
 		}
-		if sf.SubjectType() != nil && sf.SubjectType().Serialize() != key.SubjectType {
+		if sf.SubjectType != nil && *sf.SubjectType != key.SubjectType {
 			return false
 		}
-		if sf.SubjectId() != nil && sf.SubjectId().Serialize() != key.SubjectID {
+		if sf.SubjectId != nil && *sf.SubjectId != key.SubjectID {
 			return false
 		}
 	}
 	return true
 }
 
-func (s *SimpleRelationsRepository) ReadTuples(_ context.Context, filter model.TupleFilter, _ *model.Pagination, _ model.Consistency,
-) (model.ResultStream[model.ReadTuplesItem], error) {
+// ReadTuples implements RelationsRepository.
+// It returns tuples matching the filter.
+// This is a simple direct-tuple lookup, not a full ReBAC graph traversal.
+func (s *SimpleRelationsRepository) ReadTuples(_ context.Context, req *kessel.ReadTuplesRequest) (grpc.ServerStreamingClient[kessel.ReadTuplesResponse], error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var results []model.ReadTuplesItem
+	filter := req.GetFilter()
+
+	var results []*kessel.ReadTuplesResponse
 	for key := range s.tuples {
-		if simpleMatchesTupleFilter(key, filter) {
-			objReporterType := model.DeserializeReporterType(key.ResourceNamespace)
-			objReporter := model.NewReporterReference(objReporterType, nil)
-			object := model.NewResourceReference(
-				model.DeserializeResourceType(key.ResourceType),
-				model.DeserializeLocalResourceId(key.ResourceID),
-				&objReporter,
-			)
-
-			subReporterType := model.DeserializeReporterType(key.SubjectNamespace)
-			subReporter := model.NewReporterReference(subReporterType, nil)
-			subResource := model.NewResourceReference(
-				model.DeserializeResourceType(key.SubjectType),
-				model.DeserializeLocalResourceId(key.SubjectID),
-				&subReporter,
-			)
-
-			results = append(results, model.NewReadTuplesItem(
-				object,
-				model.DeserializeRelation(key.Relation),
-				model.NewSubjectReferenceWithoutRelation(subResource),
-				"",
-				model.MinimizeLatencyToken,
-			))
+		if filter == nil || simpleMatchesFilter(key, filter) {
+			results = append(results, &kessel.ReadTuplesResponse{
+				Tuple: &kessel.Relationship{
+					Resource: &kessel.ObjectReference{
+						Type: &kessel.ObjectType{
+							Namespace: key.ResourceNamespace,
+							Name:      key.ResourceType,
+						},
+						Id: key.ResourceID,
+					},
+					Relation: key.Relation,
+					Subject: &kessel.SubjectReference{
+						Subject: &kessel.ObjectReference{
+							Type: &kessel.ObjectType{
+								Namespace: key.SubjectNamespace,
+								Name:      key.SubjectType,
+							},
+							Id: key.SubjectID,
+						},
+					},
+				},
+			})
 		}
 	}
 
 	return &simpleReadTuplesStream{results: results}, nil
 }
 
-func (s *SimpleRelationsRepository) AcquireLock(_ context.Context, lockId model.LockId) (model.AcquireLockResult, error) {
+// AcquireLock implements RelationsRepository by simulating lock acquisition.
+// Returns the configured error if set via SetAcquireLockError, otherwise generates
+// a lock token based on the lock ID and stores it.
+func (s *SimpleRelationsRepository) AcquireLock(_ context.Context, req *kessel.AcquireLockRequest) (*kessel.AcquireLockResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Return configured error if set
 	if s.acquireLockError != nil {
-		return model.AcquireLockResult{}, s.acquireLockError
+		return nil, s.acquireLockError
 	}
 
-	token := "token-" + lockId.String()
-	s.locks[lockId.String()] = token
+	// Generate lock token from lock ID (simplified - just use the lock ID as the token)
+	lockId := req.GetLockId()
+	token := "token-" + lockId
+	s.locks[lockId] = token
 
-	return model.NewAcquireLockResult(model.DeserializeLockToken(token)), nil
+	return &kessel.AcquireLockResponse{
+		LockToken: token,
+	}, nil
 }
 
-func consistencyToSimpleToken(c model.Consistency) string {
-	if token := model.ConsistencyAtLeastAsFreshToken(c); token != nil {
-		return token.Serialize()
-	}
-	return ""
+// UnsetWorkspace implements RelationsRepository.
+func (s *SimpleRelationsRepository) UnsetWorkspace(_ context.Context, _, _, _ string) (*kessel.DeleteTuplesResponse, error) {
+	return &kessel.DeleteTuplesResponse{}, nil
 }
 
-type simpleLookupObjectsStream struct {
-	results []model.LookupObjectsItem
+// SetWorkspace implements RelationsRepository.
+func (s *SimpleRelationsRepository) SetWorkspace(_ context.Context, _, _, _, _ string, _ bool) (*kessel.CreateTuplesResponse, error) {
+	return &kessel.CreateTuplesResponse{}, nil
+}
+
+// simpleLookupResourcesStream implements grpc.ServerStreamingClient for LookupResourcesResponse.
+// It returns pre-computed results in order, then returns io.EOF.
+type simpleLookupResourcesStream struct {
+	results []*kessel.LookupResourcesResponse
 	index   int
 }
 
-func (s *simpleLookupObjectsStream) Recv() (model.LookupObjectsItem, error) {
+func (s *simpleLookupResourcesStream) Recv() (*kessel.LookupResourcesResponse, error) {
 	if s.index >= len(s.results) {
-		return model.LookupObjectsItem{}, io.EOF
+		return nil, io.EOF
 	}
 	result := s.results[s.index]
 	s.index++
 	return result, nil
+}
+
+func (s *simpleLookupResourcesStream) Header() (metadata.MD, error) {
+	return nil, nil
+}
+
+func (s *simpleLookupResourcesStream) Trailer() metadata.MD {
+	return nil
+}
+
+func (s *simpleLookupResourcesStream) CloseSend() error {
+	return nil
+}
+
+func (s *simpleLookupResourcesStream) Context() context.Context {
+	return context.Background()
+}
+
+func (s *simpleLookupResourcesStream) SendMsg(_ interface{}) error {
+	return nil
+}
+
+func (s *simpleLookupResourcesStream) RecvMsg(_ interface{}) error {
+	return nil
 }
 
 type simpleLookupSubjectsStream struct {
-	results []model.LookupSubjectsItem
+	results []*kessel.LookupSubjectsResponse
 	index   int
 }
 
-func (s *simpleLookupSubjectsStream) Recv() (model.LookupSubjectsItem, error) {
+func (s *simpleLookupSubjectsStream) Recv() (*kessel.LookupSubjectsResponse, error) {
 	if s.index >= len(s.results) {
-		return model.LookupSubjectsItem{}, io.EOF
+		return nil, io.EOF
 	}
 	result := s.results[s.index]
 	s.index++
 	return result, nil
+}
+
+func (s *simpleLookupSubjectsStream) Header() (metadata.MD, error) {
+	return nil, nil
+}
+
+func (s *simpleLookupSubjectsStream) Trailer() metadata.MD {
+	return nil
+}
+
+func (s *simpleLookupSubjectsStream) CloseSend() error {
+	return nil
+}
+
+func (s *simpleLookupSubjectsStream) Context() context.Context {
+	return context.Background()
+}
+
+func (s *simpleLookupSubjectsStream) SendMsg(_ interface{}) error {
+	return nil
+}
+
+func (s *simpleLookupSubjectsStream) RecvMsg(_ interface{}) error {
+	return nil
 }
 
 type simpleReadTuplesStream struct {
-	results []model.ReadTuplesItem
+	results []*kessel.ReadTuplesResponse
 	index   int
 }
 
-func (s *simpleReadTuplesStream) Recv() (model.ReadTuplesItem, error) {
+func (s *simpleReadTuplesStream) Recv() (*kessel.ReadTuplesResponse, error) {
 	if s.index >= len(s.results) {
-		return model.ReadTuplesItem{}, io.EOF
+		return nil, io.EOF
 	}
 	result := s.results[s.index]
 	s.index++
 	return result, nil
+}
+
+func (s *simpleReadTuplesStream) Header() (metadata.MD, error) {
+	return nil, nil
+}
+
+func (s *simpleReadTuplesStream) Trailer() metadata.MD {
+	return nil
+}
+
+func (s *simpleReadTuplesStream) CloseSend() error {
+	return nil
+}
+
+func (s *simpleReadTuplesStream) Context() context.Context {
+	return context.Background()
+}
+
+func (s *simpleReadTuplesStream) SendMsg(_ interface{}) error {
+	return nil
+}
+
+func (s *simpleReadTuplesStream) RecvMsg(_ interface{}) error {
+	return nil
 }

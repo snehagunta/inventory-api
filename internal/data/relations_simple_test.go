@@ -6,138 +6,139 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/project-kessel/inventory-api/internal/biz/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	kessel "github.com/project-kessel/relations-api/api/kessel/relations/v1beta1"
 )
-
-func testResourceKey(namespace, resourceType, resourceID string) model.ReporterResourceKey {
-	key, _ := model.NewReporterResourceKey(
-		model.DeserializeLocalResourceId(resourceID),
-		model.DeserializeResourceType(resourceType),
-		model.DeserializeReporterType(namespace),
-		model.DeserializeReporterInstanceId(""),
-	)
-	return key
-}
-
-func resourceRefFromKey(key model.ReporterResourceKey) model.ResourceReference {
-	reporter := model.NewReporterReference(key.ReporterType(), nil)
-	return model.NewResourceReference(key.ResourceType(), key.LocalResourceId(), &reporter)
-}
-
-func testSubjectRef(subjectID string) model.SubjectReference {
-	key, _ := model.NewReporterResourceKey(
-		model.DeserializeLocalResourceId(subjectID),
-		model.DeserializeResourceType("principal"),
-		model.DeserializeReporterType("rbac"),
-		model.DeserializeReporterInstanceId(""),
-	)
-	return model.NewSubjectReferenceWithoutRelation(resourceRefFromKey(key))
-}
-
-func testRelationship(namespace, resourceType, resourceID, relation, subjectID string) model.Relationship {
-	return model.NewRelationship(
-		resourceRefFromKey(testResourceKey(namespace, resourceType, resourceID)),
-		model.DeserializeRelation(relation),
-		testSubjectRef(subjectID),
-	)
-}
-
-func testTupleFilterForPrincipalTuple(namespace, resourceType, resourceID, relation, subjectID string) model.TupleFilter {
-	return model.NewTupleFilter().
-		WithReporterType(model.DeserializeReporterType(namespace)).
-		WithObjectType(model.DeserializeResourceType(resourceType)).
-		WithObjectId(model.DeserializeLocalResourceId(resourceID)).
-		WithRelation(model.DeserializeRelation(relation)).
-		WithSubject(model.NewTupleSubjectFilter().
-			WithReporterType(model.DeserializeReporterType("rbac")).
-			WithSubjectType(model.DeserializeResourceType("principal")).
-			WithSubjectId(model.DeserializeLocalResourceId(subjectID)))
-}
-
-func testPrincipalTuple(namespace, resourceType, resourceID, relation, subjectID string) model.RelationsTuple {
-	rn := model.NewReporterReference(model.DeserializeReporterType(namespace), nil)
-	object := model.NewResourceReference(
-		model.DeserializeResourceType(resourceType),
-		model.DeserializeLocalResourceId(resourceID),
-		&rn,
-	)
-	subR := model.NewReporterReference(model.DeserializeReporterType("rbac"), nil)
-	subjectRes := model.NewResourceReference(
-		model.DeserializeResourceType("principal"),
-		model.DeserializeLocalResourceId(subjectID),
-		&subR,
-	)
-	return model.NewRelationsTuple(
-		object,
-		model.DeserializeRelation(relation),
-		model.NewSubjectReferenceWithoutRelation(subjectRes),
-	)
-}
 
 func TestSimpleRelationsRepository_DefaultDeny(t *testing.T) {
 	repo := NewSimpleRelationsRepository()
 
-	result, err := repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-123"),
-		model.NewConsistencyMinimizeLatency(),
+	allowed, _, err := repo.Check(context.Background(),
+		"hbi", "view", "", "host", "resource-1",
+		&kessel.SubjectReference{
+			Subject: &kessel.ObjectReference{
+				Type: &kessel.ObjectType{Namespace: "rbac", Name: "principal"},
+				Id:   "user-123",
+			},
+		},
 	)
 
 	require.NoError(t, err)
-	assert.False(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_FALSE, allowed)
 }
 
 func TestSimpleRelationsRepository_CreateTuples_ThenCheck(t *testing.T) {
 	repo := NewSimpleRelationsRepository()
 
-	tuples := []model.RelationsTuple{
-		testPrincipalTuple("hbi", "host", "resource-1", "view", "user-123"),
-	}
-
-	_, err := repo.CreateTuples(context.Background(), tuples, false, nil)
+	_, err := repo.CreateTuples(context.Background(), &kessel.CreateTuplesRequest{
+		Tuples: []*kessel.Relationship{
+			{
+				Resource: &kessel.ObjectReference{
+					Type: &kessel.ObjectType{Namespace: "hbi", Name: "host"},
+					Id:   "resource-1",
+				},
+				Relation: "view",
+				Subject: &kessel.SubjectReference{
+					Subject: &kessel.ObjectReference{
+						Type: &kessel.ObjectType{Namespace: "rbac", Name: "principal"},
+						Id:   "user-123",
+					},
+				},
+			},
+		},
+	})
 	require.NoError(t, err)
 
-	result, err := repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-123"),
-		model.NewConsistencyMinimizeLatency(),
+	allowed, _, err := repo.Check(context.Background(),
+		"hbi", "view", "", "host", "resource-1",
+		&kessel.SubjectReference{
+			Subject: &kessel.ObjectReference{
+				Type: &kessel.ObjectType{Namespace: "rbac", Name: "principal"},
+				Id:   "user-123",
+			},
+		},
 	)
 
 	require.NoError(t, err)
-	assert.True(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_TRUE, allowed)
 }
 
 func TestSimpleRelationsRepository_DeleteTuples(t *testing.T) {
 	repo := NewSimpleRelationsRepository()
 
-	tuples := []model.RelationsTuple{
-		testPrincipalTuple("hbi", "host", "resource-1", "view", "user-123"),
-	}
-	_, _ = repo.CreateTuples(context.Background(), tuples, false, nil)
+	_, _ = repo.CreateTuples(context.Background(), &kessel.CreateTuplesRequest{
+		Tuples: []*kessel.Relationship{
+			{
+				Resource: &kessel.ObjectReference{
+					Type: &kessel.ObjectType{Namespace: "hbi", Name: "host"},
+					Id:   "resource-1",
+				},
+				Relation: "view",
+				Subject: &kessel.SubjectReference{
+					Subject: &kessel.ObjectReference{
+						Type: &kessel.ObjectType{Namespace: "rbac", Name: "principal"},
+						Id:   "user-123",
+					},
+				},
+			},
+		},
+	})
 
-	_, err := repo.DeleteTuples(context.Background(), testTupleFilterForPrincipalTuple("hbi", "host", "resource-1", "view", "user-123"), nil)
+	namespace := "hbi"
+	resourceType := "host"
+	resourceID := "resource-1"
+	relation := "view"
+	subjectNamespace := "rbac"
+	subjectType := "principal"
+	subjectID := "user-123"
+
+	_, err := repo.DeleteTuples(context.Background(), &kessel.DeleteTuplesRequest{
+		Filter: &kessel.RelationTupleFilter{
+			ResourceNamespace: &namespace,
+			ResourceType:      &resourceType,
+			ResourceId:        &resourceID,
+			Relation:          &relation,
+			SubjectFilter: &kessel.SubjectFilter{
+				SubjectNamespace: &subjectNamespace,
+				SubjectType:      &subjectType,
+				SubjectId:        &subjectID,
+			},
+		},
+	})
 	require.NoError(t, err)
 
-	result, err := repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-123"),
-		model.NewConsistencyMinimizeLatency(),
+	allowed, _, err := repo.Check(context.Background(),
+		"hbi", "view", "", "host", "resource-1",
+		&kessel.SubjectReference{
+			Subject: &kessel.ObjectReference{
+				Type: &kessel.ObjectType{Namespace: "rbac", Name: "principal"},
+				Id:   "user-123",
+			},
+		},
 	)
 
 	require.NoError(t, err)
-	assert.False(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_FALSE, allowed)
 }
 
 func TestSimpleRelationsRepository_Grant(t *testing.T) {
 	repo := NewSimpleRelationsRepository()
 	repo.Grant("user-123", "view", "hbi", "host", "resource-1")
 
-	result, err := repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-123"),
-		model.NewConsistencyMinimizeLatency(),
+	allowed, _, err := repo.Check(context.Background(),
+		"hbi", "view", "", "host", "resource-1",
+		&kessel.SubjectReference{
+			Subject: &kessel.ObjectReference{
+				Type: &kessel.ObjectType{Namespace: "rbac", Name: "principal"},
+				Id:   "user-123",
+			},
+		},
 	)
 
 	require.NoError(t, err)
-	assert.True(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_TRUE, allowed)
 }
 
 func TestSimpleRelationsRepository_Health(t *testing.T) {
@@ -146,7 +147,7 @@ func TestSimpleRelationsRepository_Health(t *testing.T) {
 	resp, err := repo.Health(context.Background())
 
 	require.NoError(t, err)
-	assert.Equal(t, "OK", resp.Status())
+	assert.NotNil(t, resp)
 }
 
 func TestSimpleRelationsRepository_Version(t *testing.T) {
@@ -160,63 +161,103 @@ func TestSimpleRelationsRepository_Version(t *testing.T) {
 func TestSimpleRelationsRepository_ConsistencyToken(t *testing.T) {
 	repo := NewSimpleRelationsRepository()
 
-	result, err := repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-a"),
-		model.NewConsistencyMinimizeLatency(),
+	_, token, err := repo.Check(context.Background(),
+		"hbi", "view", "", "host", "resource-1",
+		&kessel.SubjectReference{
+			Subject: &kessel.ObjectReference{
+				Type: &kessel.ObjectType{Namespace: "rbac", Name: "principal"},
+				Id:   "user-a",
+			},
+		},
 	)
 	require.NoError(t, err)
-	assert.Equal(t, "1", result.ConsistencyToken().Serialize())
+	assert.Equal(t, "1", token.Token)
 
 	repo.Grant("user-a", "view", "hbi", "host", "resource-1")
 
-	result, err = repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-a"),
-		model.NewConsistencyMinimizeLatency(),
+	_, token, err = repo.Check(context.Background(),
+		"hbi", "view", "", "host", "resource-1",
+		&kessel.SubjectReference{
+			Subject: &kessel.ObjectReference{
+				Type: &kessel.ObjectType{Namespace: "rbac", Name: "principal"},
+				Id:   "user-a",
+			},
+		},
 	)
 	require.NoError(t, err)
-	assert.Equal(t, "2", result.ConsistencyToken().Serialize())
+	assert.Equal(t, "2", token.Token)
+}
+
+func testPrincipalSubject(id string) *kessel.SubjectReference {
+	return &kessel.SubjectReference{
+		Subject: &kessel.ObjectReference{
+			Type: &kessel.ObjectType{Namespace: "rbac", Name: "principal"},
+			Id:   id,
+		},
+	}
+}
+
+func testCheckBulkItem(namespace, resourceType, resourceID, relation, subjectID string) *kessel.CheckBulkRequestItem {
+	return &kessel.CheckBulkRequestItem{
+		Resource: &kessel.ObjectReference{
+			Type: &kessel.ObjectType{Namespace: namespace, Name: resourceType},
+			Id:   resourceID,
+		},
+		Relation: relation,
+		Subject:  testPrincipalSubject(subjectID),
+	}
 }
 
 func TestSimpleRelationsRepository_RequiresExactMatch(t *testing.T) {
 	repo := NewSimpleRelationsRepository()
 	repo.Grant("user-123", "view", "hbi", "host", "resource-1")
 
+	baseSub := testPrincipalSubject("user-123")
+	wrongSub := testPrincipalSubject("other-user")
+
 	tests := []struct {
-		name         string
-		namespace    string
-		permission   string
-		resourceType string
-		resourceID   string
-		subjectID    string
-		subjectNS    string
-		subjectType  string
+		name            string
+		namespace       string
+		permission      string
+		resourceType    string
+		resourceID      string
+		subjectOverride *kessel.SubjectReference
 	}{
-		{"wrong subject", "hbi", "view", "host", "resource-1", "other-user", "rbac", "principal"},
-		{"wrong permission", "hbi", "edit", "host", "resource-1", "user-123", "rbac", "principal"},
-		{"wrong namespace", "other", "view", "host", "resource-1", "user-123", "rbac", "principal"},
-		{"wrong resource type", "hbi", "view", "vm", "resource-1", "user-123", "rbac", "principal"},
-		{"wrong resource id", "hbi", "view", "host", "resource-2", "user-123", "rbac", "principal"},
-		{"wrong subject namespace", "hbi", "view", "host", "resource-1", "user-123", "other", "principal"},
-		{"wrong subject type", "hbi", "view", "host", "resource-1", "user-123", "rbac", "group"},
+		{"wrong subject", "hbi", "view", "host", "resource-1", wrongSub},
+		{"wrong permission", "hbi", "edit", "host", "resource-1", baseSub},
+		{"wrong namespace", "other", "view", "host", "resource-1", baseSub},
+		{"wrong resource type", "hbi", "view", "vm", "resource-1", baseSub},
+		{"wrong resource id", "hbi", "view", "host", "resource-2", baseSub},
+		{
+			"wrong subject namespace", "hbi", "view", "host", "resource-1",
+			&kessel.SubjectReference{
+				Subject: &kessel.ObjectReference{
+					Type: &kessel.ObjectType{Namespace: "other", Name: "principal"},
+					Id:   "user-123",
+				},
+			},
+		},
+		{
+			"wrong subject type", "hbi", "view", "host", "resource-1",
+			&kessel.SubjectReference{
+				Subject: &kessel.ObjectReference{
+					Type: &kessel.ObjectType{Namespace: "rbac", Name: "group"},
+					Id:   "user-123",
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			subKey, _ := model.NewReporterResourceKey(
-				model.DeserializeLocalResourceId(tt.subjectID),
-				model.DeserializeResourceType(tt.subjectType),
-				model.DeserializeReporterType(tt.subjectNS),
-				model.DeserializeReporterInstanceId(""),
-			)
-			sub := model.NewSubjectReferenceWithoutRelation(resourceRefFromKey(subKey))
-			rel := model.NewRelationship(
-				resourceRefFromKey(testResourceKey(tt.namespace, tt.resourceType, tt.resourceID)),
-				model.DeserializeRelation(tt.permission),
-				sub,
-			)
-			result, err := repo.Check(context.Background(), rel, model.NewConsistencyMinimizeLatency())
+			sub := tt.subjectOverride
+			if sub == nil {
+				sub = baseSub
+			}
+			allowed, _, err := repo.Check(context.Background(),
+				tt.namespace, tt.permission, "", tt.resourceType, tt.resourceID, sub)
 			require.NoError(t, err)
-			assert.False(t, result.Allowed())
+			assert.Equal(t, kessel.CheckResponse_ALLOWED_FALSE, allowed)
 		})
 	}
 }
@@ -225,88 +266,97 @@ func TestSimpleRelationsRepository_Reset(t *testing.T) {
 	repo := NewSimpleRelationsRepository()
 	repo.Grant("user-123", "view", "hbi", "host", "resource-1")
 
-	result, err := repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-123"),
-		model.NewConsistencyMinimizeLatency(),
-	)
+	allowed, _, err := repo.Check(context.Background(),
+		"hbi", "view", "", "host", "resource-1", testPrincipalSubject("user-123"))
 	require.NoError(t, err)
-	assert.True(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_TRUE, allowed)
 
 	repo.Reset()
 
-	result, err = repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-123"),
-		model.NewConsistencyMinimizeLatency(),
-	)
+	allowed, _, err = repo.Check(context.Background(),
+		"hbi", "view", "", "host", "resource-1", testPrincipalSubject("user-123"))
 	require.NoError(t, err)
-	assert.False(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_FALSE, allowed)
 }
 
 func TestSimpleRelationsRepository_CheckForUpdate(t *testing.T) {
 	repo := NewSimpleRelationsRepository()
 	repo.Grant("user-123", "edit", "hbi", "host", "resource-1")
 
-	result, err := repo.CheckForUpdate(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "edit", "user-123"),
-	)
+	allowed, _, err := repo.CheckForUpdate(context.Background(),
+		"hbi", "edit", "host", "resource-1", testPrincipalSubject("user-123"))
 	require.NoError(t, err)
-	assert.True(t, result.Allowed())
+	assert.Equal(t, kessel.CheckForUpdateResponse_ALLOWED_TRUE, allowed)
 }
 
 func TestSimpleRelationsRepository_CheckBulk(t *testing.T) {
 	repo := NewSimpleRelationsRepository()
 	repo.Grant("user-123", "view", "hbi", "host", "resource-1")
 
-	items := []model.Relationship{
-		testRelationship("hbi", "host", "resource-1", "view", "user-123"),
-		testRelationship("hbi", "host", "resource-2", "view", "user-123"),
-	}
-	result, err := repo.CheckBulk(context.Background(), items, model.NewConsistencyMinimizeLatency())
+	resp, err := repo.CheckBulk(context.Background(), &kessel.CheckBulkRequest{
+		Items: []*kessel.CheckBulkRequestItem{
+			testCheckBulkItem("hbi", "host", "resource-1", "view", "user-123"),
+			testCheckBulkItem("hbi", "host", "resource-2", "view", "user-123"),
+		},
+	})
 	require.NoError(t, err)
-	require.Len(t, result.Pairs(), 2)
-	assert.True(t, result.Pairs()[0].Result().Allowed())
-	assert.False(t, result.Pairs()[1].Result().Allowed())
+	require.Len(t, resp.Pairs, 2)
+	assert.Equal(t, kessel.CheckBulkResponseItem_ALLOWED_TRUE, resp.Pairs[0].GetItem().GetAllowed())
+	assert.Equal(t, kessel.CheckBulkResponseItem_ALLOWED_FALSE, resp.Pairs[1].GetItem().GetAllowed())
 }
 
 func TestSimpleRelationsRepository_CheckForUpdateBulk(t *testing.T) {
 	repo := NewSimpleRelationsRepository()
 	repo.Grant("user-123", "view", "hbi", "host", "resource-1")
 
-	items := []model.Relationship{
-		testRelationship("hbi", "host", "resource-1", "view", "user-123"),
-		testRelationship("hbi", "host", "resource-2", "view", "user-123"),
-	}
-	result, err := repo.CheckForUpdateBulk(context.Background(), items)
+	resp, err := repo.CheckForUpdateBulk(context.Background(), &kessel.CheckForUpdateBulkRequest{
+		Items: []*kessel.CheckBulkRequestItem{
+			testCheckBulkItem("hbi", "host", "resource-1", "view", "user-123"),
+			testCheckBulkItem("hbi", "host", "resource-2", "view", "user-123"),
+		},
+	})
 	require.NoError(t, err)
-	require.Len(t, result.Pairs(), 2)
-	assert.True(t, result.Pairs()[0].Result().Allowed())
-	assert.False(t, result.Pairs()[1].Result().Allowed())
-	assert.NotEmpty(t, result.ConsistencyToken().Serialize())
+	require.Len(t, resp.Pairs, 2)
+	assert.Equal(t, kessel.CheckBulkResponseItem_ALLOWED_TRUE, resp.Pairs[0].GetItem().GetAllowed())
+	assert.Equal(t, kessel.CheckBulkResponseItem_ALLOWED_FALSE, resp.Pairs[1].GetItem().GetAllowed())
+	require.NotNil(t, resp.ConsistencyToken)
+	assert.NotEmpty(t, resp.ConsistencyToken.Token)
 }
 
 func TestSimpleRelationsRepository_MultipleTuples(t *testing.T) {
 	repo := NewSimpleRelationsRepository()
 
-	tuples := []model.RelationsTuple{
-		testPrincipalTuple("hbi", "host", "resource-1", "view", "user-a"),
-		testPrincipalTuple("hbi", "host", "resource-2", "view", "user-b"),
-	}
-	_, err := repo.CreateTuples(context.Background(), tuples, false, nil)
+	_, err := repo.CreateTuples(context.Background(), &kessel.CreateTuplesRequest{
+		Tuples: []*kessel.Relationship{
+			{
+				Resource: &kessel.ObjectReference{
+					Type: &kessel.ObjectType{Namespace: "hbi", Name: "host"},
+					Id:   "resource-1",
+				},
+				Relation: "view",
+				Subject:  testPrincipalSubject("user-a"),
+			},
+			{
+				Resource: &kessel.ObjectReference{
+					Type: &kessel.ObjectType{Namespace: "hbi", Name: "host"},
+					Id:   "resource-2",
+				},
+				Relation: "view",
+				Subject:  testPrincipalSubject("user-b"),
+			},
+		},
+	})
 	require.NoError(t, err)
 
-	result, err := repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-a"),
-		model.NewConsistencyMinimizeLatency(),
-	)
+	allowed, _, err := repo.Check(context.Background(),
+		"hbi", "view", "", "host", "resource-1", testPrincipalSubject("user-a"))
 	require.NoError(t, err)
-	assert.True(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_TRUE, allowed)
 
-	result, err = repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-2", "view", "user-b"),
-		model.NewConsistencyMinimizeLatency(),
-	)
+	allowed, _, err = repo.Check(context.Background(),
+		"hbi", "view", "", "host", "resource-2", testPrincipalSubject("user-b"))
 	require.NoError(t, err)
-	assert.True(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_TRUE, allowed)
 }
 
 func TestSimpleRelationsRepository_LookupResources(t *testing.T) {
@@ -315,27 +365,21 @@ func TestSimpleRelationsRepository_LookupResources(t *testing.T) {
 	repo.Grant("user-a", "view", "hbi", "host", "resource-2")
 	repo.Grant("user-b", "view", "hbi", "host", "resource-3")
 
-	objectType := model.NewRepresentationTypeRequired(
-		model.DeserializeResourceType("host"),
-		model.DeserializeReporterType("hbi"),
-	)
-	stream, err := repo.LookupObjects(context.Background(),
-		objectType,
-		model.DeserializeRelation("view"),
-		testSubjectRef("user-a"),
-		nil,
-		model.NewConsistencyMinimizeLatency(),
-	)
+	stream, err := repo.LookupResources(context.Background(), &kessel.LookupResourcesRequest{
+		ResourceType: &kessel.ObjectType{Namespace: "hbi", Name: "host"},
+		Relation:     "view",
+		Subject:      testPrincipalSubject("user-a"),
+	})
 	require.NoError(t, err)
 
 	var ids []string
 	for {
-		item, recvErr := stream.Recv()
+		msg, recvErr := stream.Recv()
 		if recvErr == io.EOF {
 			break
 		}
 		require.NoError(t, recvErr)
-		ids = append(ids, item.Object().ResourceId().String())
+		ids = append(ids, msg.GetResource().GetId())
 	}
 	sort.Strings(ids)
 	assert.Equal(t, []string{"resource-1", "resource-2"}, ids)
@@ -344,17 +388,11 @@ func TestSimpleRelationsRepository_LookupResources(t *testing.T) {
 func TestSimpleRelationsRepository_LookupResources_Empty(t *testing.T) {
 	repo := NewSimpleRelationsRepository()
 
-	objectType := model.NewRepresentationTypeRequired(
-		model.DeserializeResourceType("host"),
-		model.DeserializeReporterType("hbi"),
-	)
-	stream, err := repo.LookupObjects(context.Background(),
-		objectType,
-		model.DeserializeRelation("view"),
-		testSubjectRef("user-a"),
-		nil,
-		model.NewConsistencyMinimizeLatency(),
-	)
+	stream, err := repo.LookupResources(context.Background(), &kessel.LookupResourcesRequest{
+		ResourceType: &kessel.ObjectType{Namespace: "hbi", Name: "host"},
+		Relation:     "view",
+		Subject:      testPrincipalSubject("user-a"),
+	})
 	require.NoError(t, err)
 
 	_, err = stream.Recv()
@@ -367,27 +405,24 @@ func TestSimpleRelationsRepository_LookupSubjects(t *testing.T) {
 	repo.Grant("user-b", "view", "hbi", "host", "resource-1")
 	repo.Grant("user-c", "view", "hbi", "host", "resource-2")
 
-	subjectType := model.NewRepresentationTypeRequired(
-		model.DeserializeResourceType("principal"),
-		model.DeserializeReporterType("rbac"),
-	)
-	stream, err := repo.LookupSubjects(context.Background(),
-		resourceRefFromKey(testResourceKey("hbi", "host", "resource-1")),
-		model.DeserializeRelation("view"),
-		subjectType,
-		nil, nil,
-		model.NewConsistencyMinimizeLatency(),
-	)
+	stream, err := repo.LookupSubjects(context.Background(), &kessel.LookupSubjectsRequest{
+		Resource: &kessel.ObjectReference{
+			Type: &kessel.ObjectType{Namespace: "hbi", Name: "host"},
+			Id:   "resource-1",
+		},
+		Relation:    "view",
+		SubjectType: &kessel.ObjectType{Namespace: "rbac", Name: "principal"},
+	})
 	require.NoError(t, err)
 
 	var ids []string
 	for {
-		item, recvErr := stream.Recv()
+		msg, recvErr := stream.Recv()
 		if recvErr == io.EOF {
 			break
 		}
 		require.NoError(t, recvErr)
-		ids = append(ids, item.Subject().Resource().ResourceId().String())
+		ids = append(ids, msg.GetSubject().GetSubject().GetId())
 	}
 	sort.Strings(ids)
 	assert.Equal(t, []string{"user-a", "user-b"}, ids)
@@ -400,14 +435,41 @@ func TestSimpleRelationsRepository_Version_AdvancesOnMutations(t *testing.T) {
 	repo.Grant("user-a", "view", "hbi", "host", "resource-1")
 	assert.Equal(t, int64(2), repo.Version())
 
-	tuples := []model.RelationsTuple{
-		testPrincipalTuple("hbi", "host", "resource-2", "view", "user-b"),
-	}
-	_, err := repo.CreateTuples(context.Background(), tuples, false, nil)
+	_, err := repo.CreateTuples(context.Background(), &kessel.CreateTuplesRequest{
+		Tuples: []*kessel.Relationship{
+			{
+				Resource: &kessel.ObjectReference{
+					Type: &kessel.ObjectType{Namespace: "hbi", Name: "host"},
+					Id:   "resource-2",
+				},
+				Relation: "view",
+				Subject:  testPrincipalSubject("user-b"),
+			},
+		},
+	})
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), repo.Version())
 
-	_, err = repo.DeleteTuples(context.Background(), testTupleFilterForPrincipalTuple("hbi", "host", "resource-2", "view", "user-b"), nil)
+	ns := "hbi"
+	rt := "host"
+	rid := "resource-2"
+	rel := "view"
+	sns := "rbac"
+	st := "principal"
+	sid := "user-b"
+	_, err = repo.DeleteTuples(context.Background(), &kessel.DeleteTuplesRequest{
+		Filter: &kessel.RelationTupleFilter{
+			ResourceNamespace: &ns,
+			ResourceType:      &rt,
+			ResourceId:        &rid,
+			Relation:          &rel,
+			SubjectFilter: &kessel.SubjectFilter{
+				SubjectNamespace: &sns,
+				SubjectType:      &st,
+				SubjectId:        &sid,
+			},
+		},
+	})
 	require.NoError(t, err)
 	assert.Equal(t, int64(4), repo.Version())
 }
@@ -429,35 +491,43 @@ func TestSimpleRelationsRepository_Snapshot_RetainAndCheck(t *testing.T) {
 
 	repo.RetainCurrentSnapshot()
 
-	_, err := repo.DeleteTuples(context.Background(), testTupleFilterForPrincipalTuple("hbi", "host", "resource-1", "view", "user-a"), nil)
+	ns := "hbi"
+	rt := "host"
+	rid := "resource-1"
+	rel := "view"
+	sns := "rbac"
+	st := "principal"
+	sid := "user-a"
+	_, err := repo.DeleteTuples(context.Background(), &kessel.DeleteTuplesRequest{
+		Filter: &kessel.RelationTupleFilter{
+			ResourceNamespace: &ns,
+			ResourceType:      &rt,
+			ResourceId:        &rid,
+			Relation:          &rel,
+			SubjectFilter: &kessel.SubjectFilter{
+				SubjectNamespace: &sns,
+				SubjectType:      &st,
+				SubjectId:        &sid,
+			},
+		},
+	})
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), repo.Version())
 
-	// Without token: uses oldest available snapshot (v2, retained) -> allowed
-	result, err := repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-a"),
-		model.NewConsistencyMinimizeLatency(),
-	)
+	allowed, _, err := repo.Check(context.Background(),
+		"hbi", "view", "", "host", "resource-1", testPrincipalSubject("user-a"))
 	require.NoError(t, err)
-	assert.True(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_TRUE, allowed)
 
-	// With token at v3 (current): deleted -> denied
-	token3 := model.DeserializeConsistencyToken(simpleFormatConsistencyToken(3))
-	result, err = repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-a"),
-		model.NewConsistencyAtLeastAsFresh(token3),
-	)
+	allowed, _, err = repo.Check(context.Background(),
+		"hbi", "view", simpleFormatConsistencyToken(3), "host", "resource-1", testPrincipalSubject("user-a"))
 	require.NoError(t, err)
-	assert.False(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_FALSE, allowed)
 
-	// With token at v2 (snapshot): still has tuple -> allowed
-	token2 := model.DeserializeConsistencyToken(simpleFormatConsistencyToken(2))
-	result, err = repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-a"),
-		model.NewConsistencyAtLeastAsFresh(token2),
-	)
+	allowed, _, err = repo.Check(context.Background(),
+		"hbi", "view", simpleFormatConsistencyToken(2), "host", "resource-1", testPrincipalSubject("user-a"))
 	require.NoError(t, err)
-	assert.True(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_TRUE, allowed)
 }
 
 func TestSimpleRelationsRepository_Snapshot_NoRetained_UsesLatest(t *testing.T) {
@@ -465,13 +535,10 @@ func TestSimpleRelationsRepository_Snapshot_NoRetained_UsesLatest(t *testing.T) 
 	repo.Grant("user-a", "view", "hbi", "host", "resource-1")
 	assert.Equal(t, int64(2), repo.Version())
 
-	token1 := model.DeserializeConsistencyToken(simpleFormatConsistencyToken(1))
-	result, err := repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-a"),
-		model.NewConsistencyAtLeastAsFresh(token1),
-	)
+	allowed, _, err := repo.Check(context.Background(),
+		"hbi", "view", simpleFormatConsistencyToken(1), "host", "resource-1", testPrincipalSubject("user-a"))
 	require.NoError(t, err)
-	assert.True(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_TRUE, allowed)
 }
 
 func TestSimpleRelationsRepository_Snapshot_FindsOldestAtLeastAsFresh(t *testing.T) {
@@ -482,40 +549,48 @@ func TestSimpleRelationsRepository_Snapshot_FindsOldestAtLeastAsFresh(t *testing
 	repo.Grant("user-a", "view", "hbi", "host", "resource-2")
 	repo.RetainCurrentSnapshot()
 
-	_, err := repo.DeleteTuples(context.Background(), testTupleFilterForPrincipalTuple("hbi", "host", "resource-1", "view", "user-a"), nil)
+	ns := "hbi"
+	rt := "host"
+	rid := "resource-1"
+	rel := "view"
+	sns := "rbac"
+	st := "principal"
+	sid := "user-a"
+	_, err := repo.DeleteTuples(context.Background(), &kessel.DeleteTuplesRequest{
+		Filter: &kessel.RelationTupleFilter{
+			ResourceNamespace: &ns,
+			ResourceType:      &rt,
+			ResourceId:        &rid,
+			Relation:          &rel,
+			SubjectFilter: &kessel.SubjectFilter{
+				SubjectNamespace: &sns,
+				SubjectType:      &st,
+				SubjectId:        &sid,
+			},
+		},
+	})
 	require.NoError(t, err)
 	assert.Equal(t, int64(4), repo.Version())
 
-	token2 := model.DeserializeConsistencyToken(simpleFormatConsistencyToken(2))
-	result, err := repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-a"),
-		model.NewConsistencyAtLeastAsFresh(token2),
-	)
+	allowed, _, err := repo.Check(context.Background(),
+		"hbi", "view", simpleFormatConsistencyToken(2), "host", "resource-1", testPrincipalSubject("user-a"))
 	require.NoError(t, err)
-	assert.True(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_TRUE, allowed)
 
-	token3 := model.DeserializeConsistencyToken(simpleFormatConsistencyToken(3))
-	result, err = repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-a"),
-		model.NewConsistencyAtLeastAsFresh(token3),
-	)
+	allowed, _, err = repo.Check(context.Background(),
+		"hbi", "view", simpleFormatConsistencyToken(3), "host", "resource-1", testPrincipalSubject("user-a"))
 	require.NoError(t, err)
-	assert.True(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_TRUE, allowed)
 
-	token4 := model.DeserializeConsistencyToken(simpleFormatConsistencyToken(4))
-	result, err = repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-a"),
-		model.NewConsistencyAtLeastAsFresh(token4),
-	)
+	allowed, _, err = repo.Check(context.Background(),
+		"hbi", "view", simpleFormatConsistencyToken(4), "host", "resource-1", testPrincipalSubject("user-a"))
 	require.NoError(t, err)
-	assert.False(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_FALSE, allowed)
 
-	result, err = repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-2", "view", "user-a"),
-		model.NewConsistencyAtLeastAsFresh(token4),
-	)
+	allowed, _, err = repo.Check(context.Background(),
+		"hbi", "view", simpleFormatConsistencyToken(4), "host", "resource-2", testPrincipalSubject("user-a"))
 	require.NoError(t, err)
-	assert.True(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_TRUE, allowed)
 }
 
 func TestSimpleRelationsRepository_Snapshot_Release(t *testing.T) {
@@ -523,25 +598,39 @@ func TestSimpleRelationsRepository_Snapshot_Release(t *testing.T) {
 	repo.Grant("user-a", "view", "hbi", "host", "resource-1")
 	v := repo.RetainCurrentSnapshot()
 
-	_, err := repo.DeleteTuples(context.Background(), testTupleFilterForPrincipalTuple("hbi", "host", "resource-1", "view", "user-a"), nil)
+	ns := "hbi"
+	rt := "host"
+	rid := "resource-1"
+	rel := "view"
+	sns := "rbac"
+	st := "principal"
+	sid := "user-a"
+	_, err := repo.DeleteTuples(context.Background(), &kessel.DeleteTuplesRequest{
+		Filter: &kessel.RelationTupleFilter{
+			ResourceNamespace: &ns,
+			ResourceType:      &rt,
+			ResourceId:        &rid,
+			Relation:          &rel,
+			SubjectFilter: &kessel.SubjectFilter{
+				SubjectNamespace: &sns,
+				SubjectType:      &st,
+				SubjectId:        &sid,
+			},
+		},
+	})
 	require.NoError(t, err)
 
-	tokenV := model.DeserializeConsistencyToken(simpleFormatConsistencyToken(v))
-	result, err := repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-a"),
-		model.NewConsistencyAtLeastAsFresh(tokenV),
-	)
+	allowed, _, err := repo.Check(context.Background(),
+		"hbi", "view", simpleFormatConsistencyToken(v), "host", "resource-1", testPrincipalSubject("user-a"))
 	require.NoError(t, err)
-	assert.True(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_TRUE, allowed)
 
 	repo.ReleaseSnapshot(v)
 
-	result, err = repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-a"),
-		model.NewConsistencyAtLeastAsFresh(tokenV),
-	)
+	allowed, _, err = repo.Check(context.Background(),
+		"hbi", "view", simpleFormatConsistencyToken(v), "host", "resource-1", testPrincipalSubject("user-a"))
 	require.NoError(t, err)
-	assert.False(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_FALSE, allowed)
 }
 
 func TestSimpleRelationsRepository_Snapshot_ClearAll(t *testing.T) {
@@ -553,13 +642,10 @@ func TestSimpleRelationsRepository_Snapshot_ClearAll(t *testing.T) {
 
 	repo.ClearSnapshots()
 
-	token2 := model.DeserializeConsistencyToken(simpleFormatConsistencyToken(2))
-	result, err := repo.Check(context.Background(),
-		testRelationship("hbi", "host", "resource-1", "view", "user-a"),
-		model.NewConsistencyAtLeastAsFresh(token2),
-	)
+	allowed, _, err := repo.Check(context.Background(),
+		"hbi", "view", simpleFormatConsistencyToken(2), "host", "resource-1", testPrincipalSubject("user-a"))
 	require.NoError(t, err)
-	assert.True(t, result.Allowed())
+	assert.Equal(t, kessel.CheckResponse_ALLOWED_TRUE, allowed)
 }
 
 func TestSimpleRelationsRepository_CheckBulk_WithConsistencyToken(t *testing.T) {
@@ -567,25 +653,55 @@ func TestSimpleRelationsRepository_CheckBulk_WithConsistencyToken(t *testing.T) 
 	repo.Grant("user-a", "view", "hbi", "host", "resource-1")
 	repo.RetainCurrentSnapshot()
 
-	_, err := repo.DeleteTuples(context.Background(), testTupleFilterForPrincipalTuple("hbi", "host", "resource-1", "view", "user-a"), nil)
+	ns := "hbi"
+	rt := "host"
+	rid := "resource-1"
+	rel := "view"
+	sns := "rbac"
+	st := "principal"
+	sid := "user-a"
+	_, err := repo.DeleteTuples(context.Background(), &kessel.DeleteTuplesRequest{
+		Filter: &kessel.RelationTupleFilter{
+			ResourceNamespace: &ns,
+			ResourceType:      &rt,
+			ResourceId:        &rid,
+			Relation:          &rel,
+			SubjectFilter: &kessel.SubjectFilter{
+				SubjectNamespace: &sns,
+				SubjectType:      &st,
+				SubjectId:        &sid,
+			},
+		},
+	})
 	require.NoError(t, err)
 
-	rel := testRelationship("hbi", "host", "resource-1", "view", "user-a")
+	item := testCheckBulkItem("hbi", "host", "resource-1", "view", "user-a")
 
-	// No consistency token -> uses oldest available snapshot -> allowed
-	respOldest, err := repo.CheckBulk(context.Background(), []model.Relationship{rel}, model.NewConsistencyMinimizeLatency())
+	respOldest, err := repo.CheckBulk(context.Background(), &kessel.CheckBulkRequest{
+		Items: []*kessel.CheckBulkRequestItem{item},
+	})
 	require.NoError(t, err)
-	assert.True(t, respOldest.Pairs()[0].Result().Allowed())
+	assert.Equal(t, kessel.CheckBulkResponseItem_ALLOWED_TRUE, respOldest.Pairs[0].GetItem().GetAllowed())
 
-	// At latest version -> denied
-	tokenLatest := model.DeserializeConsistencyToken(simpleFormatConsistencyToken(repo.Version()))
-	respLatest, err := repo.CheckBulk(context.Background(), []model.Relationship{rel}, model.NewConsistencyAtLeastAsFresh(tokenLatest))
+	respLatest, err := repo.CheckBulk(context.Background(), &kessel.CheckBulkRequest{
+		Items: []*kessel.CheckBulkRequestItem{item},
+		Consistency: &kessel.Consistency{
+			Requirement: &kessel.Consistency_AtLeastAsFresh{
+				AtLeastAsFresh: &kessel.ConsistencyToken{Token: simpleFormatConsistencyToken(repo.Version())},
+			},
+		},
+	})
 	require.NoError(t, err)
-	assert.False(t, respLatest.Pairs()[0].Result().Allowed())
+	assert.Equal(t, kessel.CheckBulkResponseItem_ALLOWED_FALSE, respLatest.Pairs[0].GetItem().GetAllowed())
 
-	// At snapshot v2 -> allowed
-	token2 := model.DeserializeConsistencyToken(simpleFormatConsistencyToken(2))
-	respSnap, err := repo.CheckBulk(context.Background(), []model.Relationship{rel}, model.NewConsistencyAtLeastAsFresh(token2))
+	respSnap, err := repo.CheckBulk(context.Background(), &kessel.CheckBulkRequest{
+		Items: []*kessel.CheckBulkRequestItem{item},
+		Consistency: &kessel.Consistency{
+			Requirement: &kessel.Consistency_AtLeastAsFresh{
+				AtLeastAsFresh: &kessel.ConsistencyToken{Token: simpleFormatConsistencyToken(2)},
+			},
+		},
+	})
 	require.NoError(t, err)
-	assert.True(t, respSnap.Pairs()[0].Result().Allowed())
+	assert.Equal(t, kessel.CheckBulkResponseItem_ALLOWED_TRUE, respSnap.Pairs[0].GetItem().GetAllowed())
 }

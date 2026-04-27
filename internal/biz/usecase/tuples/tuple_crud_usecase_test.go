@@ -30,22 +30,13 @@ func testAuthzContext() context.Context {
 func createTestTuple() model.RelationsTuple {
 	resourceId, _ := model.NewLocalResourceId("resource-1")
 	subjectId, _ := model.NewLocalResourceId("subject-1")
-	workspaceRep := model.NewReporterReference(model.DeserializeReporterType("rbac"), nil)
-	object := model.NewResourceReference(
-		model.DeserializeResourceType("workspace"),
-		resourceId,
-		&workspaceRep,
-	)
-	principalRep := model.NewReporterReference(model.DeserializeReporterType("rbac"), nil)
-	subjectRes := model.NewResourceReference(
-		model.DeserializeResourceType("principal"),
-		subjectId,
-		&principalRep,
-	)
 	return model.NewRelationsTuple(
-		object,
-		model.DeserializeRelation("member"),
-		model.NewSubjectReferenceWithoutRelation(subjectRes),
+		model.NewRelationsResource(resourceId, model.NewRelationsObjectType("workspace", "rbac")),
+		"member",
+		model.NewRelationsSubject(
+			model.NewRelationsResource(subjectId, model.NewRelationsObjectType("principal", "rbac")),
+			"",
+		),
 	)
 }
 
@@ -134,9 +125,11 @@ func TestDeleteTuples_Success(t *testing.T) {
 	meta := &recordingMetaAuthorizer{allowed: true}
 	uc := New(&data.AllowAllRelationsRepository{}, meta, log.DefaultLogger)
 
-	rt := model.DeserializeReporterType("rbac")
+	namespace := "rbac"
 	cmd := DeleteTuplesCommand{
-		Filter: model.NewTupleFilter().WithReporterType(rt),
+		Filter: TupleFilter{
+			ResourceNamespace: &namespace,
+		},
 	}
 
 	result, err := uc.DeleteTuples(ctx, cmd)
@@ -151,9 +144,11 @@ func TestDeleteTuples_UsesDeleteTuplesRelation(t *testing.T) {
 	meta := &recordingMetaAuthorizer{allowed: true}
 	uc := New(&data.AllowAllRelationsRepository{}, meta, log.DefaultLogger)
 
-	rt := model.DeserializeReporterType("rbac")
+	namespace := "rbac"
 	cmd := DeleteTuplesCommand{
-		Filter: model.NewTupleFilter().WithReporterType(rt),
+		Filter: TupleFilter{
+			ResourceNamespace: &namespace,
+		},
 	}
 
 	_, _ = uc.DeleteTuples(ctx, cmd)
@@ -167,9 +162,11 @@ func TestDeleteTuples_MetaAuthzDenied(t *testing.T) {
 	meta := &recordingMetaAuthorizer{allowed: false}
 	uc := New(&data.AllowAllRelationsRepository{}, meta, log.DefaultLogger)
 
-	rt := model.DeserializeReporterType("rbac")
+	namespace := "rbac"
 	cmd := DeleteTuplesCommand{
-		Filter: model.NewTupleFilter().WithReporterType(rt),
+		Filter: TupleFilter{
+			ResourceNamespace: &namespace,
+		},
 	}
 
 	_, err := uc.DeleteTuples(ctx, cmd)
@@ -182,9 +179,11 @@ func TestDeleteTuples_MetaAuthzContextMissing(t *testing.T) {
 	meta := &recordingMetaAuthorizer{allowed: true}
 	uc := New(&data.AllowAllRelationsRepository{}, meta, log.DefaultLogger)
 
-	rt := model.DeserializeReporterType("rbac")
+	namespace := "rbac"
 	cmd := DeleteTuplesCommand{
-		Filter: model.NewTupleFilter().WithReporterType(rt),
+		Filter: TupleFilter{
+			ResourceNamespace: &namespace,
+		},
 	}
 
 	_, err := uc.DeleteTuples(context.Background(), cmd)
@@ -201,7 +200,7 @@ func TestReadTuples_Success(t *testing.T) {
 	uc := New(&data.AllowAllRelationsRepository{}, meta, log.DefaultLogger)
 
 	cmd := ReadTuplesCommand{
-		Filter:      model.NewTupleFilter(),
+		Filter:      TupleFilter{},
 		Consistency: model.NewConsistencyMinimizeLatency(),
 	}
 
@@ -218,7 +217,7 @@ func TestReadTuples_UsesReadTuplesRelation(t *testing.T) {
 	uc := New(&data.AllowAllRelationsRepository{}, meta, log.DefaultLogger)
 
 	cmd := ReadTuplesCommand{
-		Filter:      model.NewTupleFilter(),
+		Filter:      TupleFilter{},
 		Consistency: model.NewConsistencyMinimizeLatency(),
 	}
 
@@ -234,7 +233,7 @@ func TestReadTuples_MetaAuthzDenied(t *testing.T) {
 	uc := New(&data.AllowAllRelationsRepository{}, meta, log.DefaultLogger)
 
 	cmd := ReadTuplesCommand{
-		Filter:      model.NewTupleFilter(),
+		Filter:      TupleFilter{},
 		Consistency: model.NewConsistencyMinimizeLatency(),
 	}
 
@@ -249,7 +248,7 @@ func TestReadTuples_MetaAuthzContextMissing(t *testing.T) {
 	uc := New(&data.AllowAllRelationsRepository{}, meta, log.DefaultLogger)
 
 	cmd := ReadTuplesCommand{
-		Filter:      model.NewTupleFilter(),
+		Filter:      TupleFilter{},
 		Consistency: model.NewConsistencyMinimizeLatency(),
 	}
 
@@ -512,15 +511,15 @@ func TestWhitelistMetaAuthorizer_Integration_AllOperations(t *testing.T) {
 	})
 
 	t.Run("DeleteTuples", func(t *testing.T) {
-		rt := model.DeserializeReporterType("rbac")
-		cmd := DeleteTuplesCommand{Filter: model.NewTupleFilter().WithReporterType(rt)}
+		namespace := "rbac"
+		cmd := DeleteTuplesCommand{Filter: TupleFilter{ResourceNamespace: &namespace}}
 		_, err := uc.DeleteTuples(ctx, cmd)
 		require.NoError(t, err)
 	})
 
 	t.Run("ReadTuples", func(t *testing.T) {
 		cmd := ReadTuplesCommand{
-			Filter:      model.NewTupleFilter(),
+			Filter:      TupleFilter{},
 			Consistency: model.NewConsistencyMinimizeLatency(),
 		}
 		_, err := uc.ReadTuples(ctx, cmd)

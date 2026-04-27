@@ -13,7 +13,6 @@ import (
 
 	pb "github.com/project-kessel/inventory-api/api/kessel/inventory/v1"
 	biz "github.com/project-kessel/inventory-api/internal/biz/health"
-	"github.com/project-kessel/inventory-api/internal/biz/model"
 	svc "github.com/project-kessel/inventory-api/internal/service/health"
 )
 
@@ -37,8 +36,8 @@ func TestHealthService_GetReadyz(t *testing.T) {
 	ctx := context.TODO()
 
 	mockRepo := new(mocks.MockHealthRepo)
-	expectedResult := model.NewHealthResult("MOCK_OK", 200)
-	mockRepo.On("IsBackendAvailable", ctx).Return(expectedResult, nil)
+	expectedResp := &pb.GetReadyzResponse{Status: "MOCK_OK", Code: 200}
+	mockRepo.On("IsBackendAvailable", ctx).Return(expectedResp, nil)
 
 	uc := biz.New(mockRepo, log.DefaultLogger)
 	service := svc.New(uc)
