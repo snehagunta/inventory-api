@@ -458,16 +458,17 @@ func shutdown(db *gorm.DB, srv *server.Server, pprofSrv *pprof.Server, cm *consu
 func newSchemaRepository(ctx context.Context, c schema.CompletedConfig, logger *log.Helper) (bizmodel.SchemaRepository, error) {
 	switch c.Repository {
 	case schema.InMemoryRepository:
+		schemaFactory := data.NewSchemaFactoryWithFeatures()
 		switch c.InMemory.Type {
 		case inmemoryConfig.EmptyRepository:
 			logger.Infof("Using empty in-memory schema repository")
 			return data.NewInMemorySchemaRepository(), nil
 		case inmemoryConfig.JSONRepository:
 			logger.Infof("Using json in-memory schema repository from path %q", c.InMemory.Path)
-			return data.NewInMemorySchemaRepositoryFromJsonFile(ctx, c.InMemory.Path, data.NewJsonSchemaWithWorkspacesFromString)
+			return data.NewInMemorySchemaRepositoryFromJsonFile(ctx, c.InMemory.Path, schemaFactory)
 		case inmemoryConfig.DirRepository:
 			logger.Infof("Using dir in-memory schema repository from path %q", c.InMemory.Path)
-			return data.NewInMemorySchemaRepositoryFromDir(ctx, c.InMemory.Path, data.NewJsonSchemaWithWorkspacesFromString)
+			return data.NewInMemorySchemaRepositoryFromDir(ctx, c.InMemory.Path, schemaFactory)
 		default:
 			return nil, fmt.Errorf("invalid repository type: %s/%s", c.Repository, c.InMemory.Type)
 		}

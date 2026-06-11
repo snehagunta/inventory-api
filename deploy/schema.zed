@@ -486,6 +486,8 @@
   	permission notifications_integration_view_history = t_binding->notifications_integration_view_history + t_parent->notifications_integration_view_history
   	permission parent = t_parent
   	relation t_parent: rbac/workspace | rbac/tenant
+  	relation t_child: rbac/workspace
+  	permission descendents = t_child + t_child->descendents
   }
 
   definition acm/k8s_cluster {
@@ -498,6 +500,21 @@
 
   definition notifications/notifications_integration {
     relation t_workspace: rbac/workspace
+  }
+
+  definition features/billing_account {
+    relation t_workspace: rbac/workspace
+    permission enabled_workspaces = t_workspace + t_workspace->descendents
+  }
+
+  definition features/service {
+    relation t_allowed_workspaces: rbac/workspace
+    relation t_billing_account: features/billing_account
+    relation t_parent: features/service
+
+    permission does_workspace_have_service_preference = t_allowed_workspaces + t_allowed_workspaces->descendents + t_parent->does_workspace_have_service_preference
+    permission does_workspace_have_license = t_billing_account->enabled_workspaces
+    permission can_workspace_use_service = does_workspace_have_service_preference & does_workspace_have_license
   }
 
   definition kessel/lock {

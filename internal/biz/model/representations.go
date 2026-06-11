@@ -75,3 +75,45 @@ func (r *Representations) WorkspaceID() string {
 	}
 	return ""
 }
+
+// AllowedWorkspaceIDs returns the allowed_workspace_ids array from common representation.
+func (r *Representations) AllowedWorkspaceIDs() []string {
+	if r == nil || !r.HasCommon() {
+		return nil
+	}
+	raw, ok := r.commonData["allowed_workspace_ids"]
+	if !ok || raw == nil {
+		return nil
+	}
+	arr, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(arr))
+	for _, item := range arr {
+		if s, ok := item.(string); ok && s != "" {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+// BillingAccountID returns the billing_account_id from common representation.
+func (r *Representations) BillingAccountID() string {
+	if r != nil && r.HasCommon() {
+		if id, ok := r.commonData["billing_account_id"].(string); ok {
+			return id
+		}
+	}
+	return ""
+}
+
+// ParentServiceID returns the parent_service_id from common representation.
+func (r *Representations) ParentServiceID() string {
+	if r != nil && r.HasCommon() {
+		if id, ok := r.commonData["parent_service_id"].(string); ok {
+			return id
+		}
+	}
+	return ""
+}
