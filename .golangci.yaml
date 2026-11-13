@@ -8,6 +8,23 @@ linters:
     - staticcheck
     - unused
     # End: Defaults
+  # Enable these only for domain types enrolled in the migration. Existing model
+  # code has findings that must be reviewed before they become a global gate.
+  disable:
+    - domainconstruct
+    - domainzero
+    - domainserialization
+  settings:
+    custom:
+      domainconstruct:
+        type: module
+        description: Require approved construction of annotated domain values.
+      domainzero:
+        type: module
+        description: Report invalid zero domain values reaching operations.
+      domainserialization:
+        type: module
+        description: Require declared domain codecs and plain snapshots.
 formatters:
   enable:
     - goimports

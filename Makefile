@@ -202,11 +202,19 @@ all:
 # run go linter with the repositories lint config
 lint:
 	@echo "Running golangci-lint"
-	@$(DOCKER) run -t --rm -v $(PWD):/app:rw,z -w /app golangci/golangci-lint:v2.13.2 golangci-lint run -v
+	@$(GO) -C tools/golangci-lint build -o /tmp/inventory-api-golangci-lint .
+	@/tmp/inventory-api-golangci-lint run --config .golangci.yaml -v ./...
 
 lint-fix:
 	@echo "Running golangci-lint run --fix"
-	@$(DOCKER) run -t --rm -v $(PWD):/app:rw,z -w /app golangci/golangci-lint:v2.13.2 golangci-lint run --fix -v
+	@$(GO) -C tools/golangci-lint build -o /tmp/inventory-api-golangci-lint .
+	@/tmp/inventory-api-golangci-lint run --config .golangci.yaml --fix -v ./...
+
+.PHONY: lint-domain
+lint-domain:
+	@echo "Running domain modeling linters"
+	@$(GO) -C tools/golangci-lint build -o /tmp/inventory-api-golangci-lint .
+	@/tmp/inventory-api-golangci-lint run --config .golangci.yaml --enable-only domainconstruct,domainzero,domainserialization ./internal/biz/model/...
 
 .PHONY: pr-check
 # generate pr-check

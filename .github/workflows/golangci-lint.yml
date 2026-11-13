@@ -16,7 +16,6 @@ jobs:
         with:
           go-version-file: 'go.mod'
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.15.0
-          args: --timeout=10m
+        run: go -C tools/golangci-lint build -o /tmp/inventory-api-golangci-lint .
+      - name: Run linters
+        run: /tmp/inventory-api-golangci-lint run --config .golangci.yaml --timeout=10m ./...
