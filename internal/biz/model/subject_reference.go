@@ -2,6 +2,7 @@ package model
 
 // SubjectReference represents a subject in an authorization check.
 // It wraps a ResourceReference (identifying the subject) with an optional relation.
+//domain:constructors NewSubjectReference NewSubjectReferenceWithoutRelation
 type SubjectReference struct {
 	resource ResourceReference
 	relation *Relation // nil means no relation (direct subject reference)

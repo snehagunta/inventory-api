@@ -11,6 +11,7 @@ import (
 const initialCommonVersion = 0
 
 // Create Entities with unexported fields for encapsulation
+//domain:constructors NewResource DeserializeResource Resource.Update Resource.Delete
 type Resource struct {
 	id            ResourceId
 	resourceType  ResourceType

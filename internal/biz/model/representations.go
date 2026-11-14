@@ -9,6 +9,7 @@ import (
 // At least one version must be present (indicating that stream advanced).
 // A version can exist without data (tombstone case - nil/empty data with version).
 // Non-empty data requires a version.
+//domain:constructors NewRepresentations
 type Representations struct {
 	commonData                    Representation
 	commonVersion                 *Version

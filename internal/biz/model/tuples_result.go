@@ -1,6 +1,7 @@
 package model
 
 // TuplesResult contains the outcome of a tuple mutation (create or delete).
+//domain:constructors NewTuplesResult
 type TuplesResult struct {
 	consistencyToken ConsistencyToken
 }

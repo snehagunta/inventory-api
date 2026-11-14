@@ -3,6 +3,7 @@ package model
 // RelationsTuple represents a stored relationship fact.
 // Structurally identical to Relationship but semantically distinct:
 // a Relationship is a query ("does this hold?"), a RelationsTuple is a persisted fact.
+//domain:constructors NewRelationsTuple NewWorkspaceRelationsTuple NewRelationTupleForSubject
 type RelationsTuple struct {
 	object   ResourceReference
 	relation Relation

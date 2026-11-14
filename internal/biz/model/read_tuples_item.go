@@ -1,6 +1,7 @@
 package model
 
 // ReadTuplesItem represents a single tuple returned from a ReadTuples stream.
+//domain:constructors NewReadTuplesItem
 type ReadTuplesItem struct {
 	object            ResourceReference
 	relation          Relation

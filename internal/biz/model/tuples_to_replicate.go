@@ -1,5 +1,6 @@
 package model
 
+//domain:constructors NewTuplesToReplicate
 type TuplesToReplicate struct {
 	tuplesToCreate *[]RelationsTuple
 	tuplesToDelete *[]RelationsTuple

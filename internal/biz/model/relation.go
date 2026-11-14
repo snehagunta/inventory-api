@@ -6,6 +6,7 @@ import (
 )
 
 // Relation represents a relation name in the authorization model.
+//domain:constructors NewRelation DeserializeRelation
 type Relation string
 
 // NewRelation creates a new Relation from a string.

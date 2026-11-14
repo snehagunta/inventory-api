@@ -3,6 +3,7 @@ package model
 // Relationship represents a query concept in the Relations domain:
 // "does this Object have this Relation to this Subject?"
 // May be backed by a stored tuple or derived via schema rules.
+//domain:constructors NewRelationship
 type Relationship struct {
 	object   ResourceReference
 	relation Relation

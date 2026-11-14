@@ -1,6 +1,7 @@
 package model
 
 // ResourceReference identifies a specific resource to check access for
+//domain:constructors NewResourceReference
 type ResourceReference struct {
 	resourceType ResourceType       // required
 	resourceId   LocalResourceId    // required
@@ -21,6 +22,7 @@ func (r ResourceReference) Reporter() *ReporterReference { return r.reporter }
 func (r ResourceReference) HasReporter() bool            { return r.reporter != nil }
 
 // ReporterReference identifies a reporter within a ResourceReference.
+//domain:constructors NewReporterReference
 type ReporterReference struct {
 	reporterType ReporterType        // required
 	instanceId   *ReporterInstanceId // optional

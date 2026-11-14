@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
+//domain:constructors NewCommonRepresentation DeserializeCommonRepresentation
 type CommonRepresentation struct {
 	Representation
 	resourceId    ResourceId

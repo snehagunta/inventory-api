@@ -2,6 +2,8 @@ package model
 
 // TupleFilter represents filtering criteria for tuple queries.
 // All fields are optional (nil = match any). Uses builder pattern for construction.
+//domain:constructors NewTupleFilter TupleFilter.WithObjectType TupleFilter.WithReporterType TupleFilter.WithObjectId TupleFilter.WithRelation TupleFilter.WithSubject
+//domain:zero-valid
 type TupleFilter struct {
 	objectType   *ResourceType
 	reporterType *ReporterType
@@ -28,6 +30,8 @@ func (f TupleFilter) Subject() *TupleSubjectFilter { return f.subject }
 
 // TupleSubjectFilter represents subject filtering criteria within a TupleFilter.
 // All fields are optional (nil = match any). Uses builder pattern for construction.
+//domain:constructors NewTupleSubjectFilter TupleSubjectFilter.WithSubjectType TupleSubjectFilter.WithReporterType TupleSubjectFilter.WithSubjectId TupleSubjectFilter.WithRelation
+//domain:zero-valid
 type TupleSubjectFilter struct {
 	subjectType  *ResourceType
 	reporterType *ReporterType

@@ -1,6 +1,7 @@
 package model
 
 // FencingCheck contains fencing token information for tuple operations.
+//domain:constructors NewFencingCheck
 type FencingCheck struct {
 	lockId    LockId
 	lockToken LockToken

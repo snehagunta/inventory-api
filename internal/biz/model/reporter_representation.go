@@ -8,6 +8,7 @@ import (
 	"github.com/project-kessel/inventory-api/internal"
 )
 
+//domain:constructors NewReporterDataRepresentation NewReporterDeleteRepresentation DeserializeReporterDataRepresentation
 type ReporterRepresentation struct {
 	Representation
 	reporterResourceID ReporterResourceId
@@ -19,10 +20,12 @@ type ReporterRepresentation struct {
 	transactionId      TransactionId
 }
 
+//domain:constructors NewReporterDataRepresentation DeserializeReporterDataRepresentation
 type ReporterDataRepresentation struct {
 	ReporterRepresentation
 }
 
+//domain:constructors NewReporterDeleteRepresentation
 type ReporterDeleteRepresentation struct {
 	ReporterRepresentation
 }

@@ -25,6 +25,8 @@ type Schema interface {
 // DefaultSchema provides the default tuple calculation behavior for resource types
 // that do not have a registered JSON schema. It creates workspace-based tuples
 // using the workspace_id from representations, with no validation constraints.
+//domain:constructors NewDefaultSchema
+//domain:zero-valid
 type DefaultSchema struct{}
 
 var defaultSchemaInstance = DefaultSchema{}
@@ -83,6 +85,7 @@ func (d DefaultSchema) CalculateTuples(currentRepresentation, previousRepresenta
 type ResourceTypeSchemaFactory func(resourceType ResourceType, isReporter bool, jsonSchema string) Schema
 
 // ResourceSchemaRepresentation holds a resource schema with its validation and tuple logic.
+//domain:constructors NewResourceSchemaRepresentation
 type ResourceSchemaRepresentation struct {
 	resourceType ResourceType
 	schema       Schema
@@ -102,6 +105,7 @@ func (r ResourceSchemaRepresentation) ResourceType() ResourceType { return r.res
 func (r ResourceSchemaRepresentation) Schema() Schema             { return r.schema }
 
 // ReporterSchemaRepresentation holds a reporter-specific schema.
+//domain:constructors NewReporterSchemaRepresentation
 type ReporterSchemaRepresentation struct {
 	resourceType ResourceType
 	reporterType ReporterType
@@ -131,6 +135,7 @@ func (r ReporterSchemaRepresentation) Schema() Schema             { return r.sch
 // relationName is the relation written to SpiceDB; subjectNamespace and
 // subjectResourceType identify the subject side of the tuple; multiValued
 // indicates whether the field holds an array (true) or a scalar (false).
+//domain:constructors NewRelationDef
 type RelationDef struct {
 	fieldName           string
 	relationName        string

@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
+//domain:constructors NewResourceDeleteEvent
 type ResourceDeleteEvent struct {
 	id                     ResourceId
 	resourceType           ResourceType

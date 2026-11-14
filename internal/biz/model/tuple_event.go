@@ -5,6 +5,8 @@ import (
 	"fmt"
 )
 
+//domain:constructors NewTupleEvent TupleEvent.UnmarshalJSON
+//domain:serialization json
 type TupleEvent struct {
 	reporterResourceKey           ReporterResourceKey
 	commonVersion                 *Version

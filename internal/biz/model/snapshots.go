@@ -8,11 +8,13 @@ import (
 )
 
 // RepresentationSnapshot is a DTO for the representation data structure
+//domain:snapshot
 type RepresentationSnapshot struct {
 	Data internal.JsonObject `json:"data"`
 }
 
 // ResourceSnapshot is a DTO that mirrors the GORM Resource model structure
+//domain:snapshot
 type ResourceSnapshot struct {
 	ID            uuid.UUID `json:"id"`
 	Type          string    `json:"type"`
@@ -28,6 +30,7 @@ type ResourceSnapshot struct {
 }
 
 // ReporterResourceKeySnapshot is a DTO that mirrors the GORM ReporterResourceKey structure
+//domain:snapshot
 type ReporterResourceKeySnapshot struct {
 	LocalResourceID    string `json:"local_resource_id"`
 	ReporterType       string `json:"reporter_type"`
@@ -36,6 +39,7 @@ type ReporterResourceKeySnapshot struct {
 }
 
 // ReporterResourceSnapshot is a DTO that mirrors the GORM ReporterResource model structure
+//domain:snapshot
 type ReporterResourceSnapshot struct {
 	ID                    uuid.UUID                   `json:"id"`
 	ReporterResourceKey   ReporterResourceKeySnapshot `json:"reporter_resource_key"`
@@ -50,6 +54,7 @@ type ReporterResourceSnapshot struct {
 }
 
 // CommonRepresentationSnapshot is a DTO that mirrors the GORM CommonRepresentation model structure
+//domain:snapshot
 type CommonRepresentationSnapshot struct {
 	Representation             RepresentationSnapshot `json:"representation"`
 	ResourceId                 uuid.UUID              `json:"resource_id"`
@@ -61,6 +66,7 @@ type CommonRepresentationSnapshot struct {
 }
 
 // ReporterRepresentationSnapshot is a DTO that mirrors the GORM ReporterRepresentation model structure
+//domain:snapshot
 type ReporterRepresentationSnapshot struct {
 	Representation     RepresentationSnapshot `json:"representation"`
 	ReporterResourceID uuid.UUID              `json:"reporter_resource_id"`

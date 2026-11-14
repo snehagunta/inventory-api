@@ -3,6 +3,7 @@ package model
 // Pagination represents pagination parameters for streaming queries.
 // The struct pointer itself is nil when pagination is not specified.
 // If the struct exists, proto validation guarantees Limit > 0.
+//domain:constructors NewPagination
 type Pagination struct {
 	// Limit is the maximum number of results to return (always > 0 when Pagination is non-nil).
 	Limit uint32

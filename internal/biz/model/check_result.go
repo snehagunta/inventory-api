@@ -1,6 +1,7 @@
 package model
 
 // CheckResult contains the outcome of a single permission check.
+//domain:constructors NewCheckResult
 type CheckResult struct {
 	allowed          bool
 	consistencyToken ConsistencyToken

@@ -1,5 +1,6 @@
 package model
 
+//domain:constructors NewReporterId DeserializeReporterId
 type ReporterId struct {
 	reporterType       ReporterType
 	reporterInstanceId ReporterInstanceId

@@ -100,6 +100,7 @@ func DeserializeConsistencyToken(value string) ConsistencyToken {
 }
 
 // ContinuationToken is an opaque pagination cursor from clients or authz backends.
+//domain:constructors NewContinuationToken DeserializeContinuationToken
 type ContinuationToken string
 
 func NewContinuationToken(token string) (ContinuationToken, error) {
@@ -159,6 +160,8 @@ type Incrementable interface {
 	Increment() Incrementable
 }
 
+//domain:constructors NewVersion DeserializeVersion Version.Increment Version.Decrement
+//domain:zero-valid
 type Version uint
 
 func NewVersion(version uint) Version {
@@ -189,6 +192,7 @@ func (v Version) Serialize() uint {
 	return SerializeUint(v)
 }
 
+//domain:constructors NewResourceId DeserializeResourceId
 type ResourceId uuid.UUID
 
 func NewResourceId(id uuid.UUID) (ResourceId, error) {
@@ -210,6 +214,7 @@ func (r ResourceId) Serialize() uuid.UUID {
 	return SerializeUUID(r)
 }
 
+//domain:constructors NewReporterResourceId NewReporterResourceIdFromString DeserializeReporterResourceId
 type ReporterResourceId uuid.UUID
 
 func NewReporterResourceId(id uuid.UUID) (ReporterResourceId, error) {
@@ -245,6 +250,7 @@ func (rr ReporterResourceId) Serialize() uuid.UUID {
 	return SerializeUUID(rr)
 }
 
+//domain:constructors NewResourceType DeserializeResourceType
 type ResourceType string
 
 func NewResourceType(resourceType string) (ResourceType, error) {
@@ -262,6 +268,7 @@ func (rt ResourceType) String() string {
 
 func (rt ResourceType) Serialize() string { return SerializeString(rt) }
 
+//domain:constructors NewReporterType DeserializeReporterType
 type ReporterType string
 
 func NewReporterType(reporterType string) (ReporterType, error) {
@@ -278,6 +285,7 @@ func (rt ReporterType) String() string {
 
 func (rt ReporterType) Serialize() string { return SerializeString(rt) }
 
+//domain:constructors NewReporterInstanceId DeserializeReporterInstanceId
 type ReporterInstanceId string
 
 func NewReporterInstanceId(reporterInstanceId string) (ReporterInstanceId, error) {
@@ -294,6 +302,7 @@ func (ri ReporterInstanceId) String() string {
 
 func (ri ReporterInstanceId) Serialize() string { return SerializeString(ri) }
 
+//domain:constructors NewConsistencyToken DeserializeConsistencyToken
 type ConsistencyToken string
 
 func NewConsistencyToken(token string) (ConsistencyToken, error) {
@@ -312,6 +321,8 @@ func (ct ConsistencyToken) Serialize() string {
 	return SerializeString(ct)
 }
 
+//domain:constructors NewGeneration DeserializeGeneration Generation.Increment
+//domain:zero-valid
 type Generation uint
 
 func NewGeneration(generation uint) Generation {
@@ -333,6 +344,7 @@ func (g Generation) Serialize() uint {
 	return SerializeUint(g)
 }
 
+//domain:constructors NewReporterVersion DeserializeReporterVersion
 type ReporterVersion string
 
 func NewReporterVersion(version string) (ReporterVersion, error) {
@@ -351,6 +363,8 @@ func (rv ReporterVersion) Serialize() string {
 	return SerializeString(rv)
 }
 
+//domain:constructors NewTombstone DeserializeTombstone
+//domain:zero-valid
 type Tombstone bool
 
 func NewTombstone(tombstone bool) Tombstone {
@@ -365,6 +379,7 @@ func (t Tombstone) Serialize() bool {
 	return SerializeBool(t)
 }
 
+//domain:constructors NewURI DeserializeURI
 type URI string
 
 func NewURI(uri string) (URI, error) {
@@ -403,6 +418,7 @@ func NewConsoleHref(href string) (ConsoleHref, error) {
 	return ConsoleHref(uri), nil
 }
 
+//domain:constructors NewLocalResourceId DeserializeLocalResourceId
 type LocalResourceId string
 
 func NewLocalResourceId(id string) (LocalResourceId, error) {
@@ -446,6 +462,7 @@ func DeserializeRepresentation(data internal.JsonObject) Representation {
 	return Representation(data)
 }
 
+//domain:constructors NewTransactionId DeserializeTransactionId
 type TransactionId string
 
 func (t TransactionId) String() string {
@@ -462,6 +479,7 @@ func NewTransactionId(transactionId string) TransactionId {
 	return TransactionId(transactionId)
 }
 
+//domain:constructors NewLockId DeserializeLockId
 type LockId string
 
 func NewLockId(id string) (LockId, error) {
@@ -484,6 +502,7 @@ func DeserializeLockId(value string) LockId {
 	return Deserialize[LockId](value)
 }
 
+//domain:constructors NewLockToken DeserializeLockToken
 type LockToken string
 
 func NewLockToken(token string) (LockToken, error) {

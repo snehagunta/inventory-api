@@ -1,6 +1,7 @@
 package model
 
 // CheckBulkResultItem contains the result for a single bulk check item.
+//domain:constructors NewCheckBulkResultItem
 type CheckBulkResultItem struct {
 	allowed   bool
 	err       error
@@ -16,6 +17,7 @@ func (i CheckBulkResultItem) Err() error       { return i.err }
 func (i CheckBulkResultItem) ErrorCode() int32 { return i.errorCode }
 
 // CheckBulkResultPair pairs a request Relationship with its result.
+//domain:constructors NewCheckBulkResultPair
 type CheckBulkResultPair struct {
 	request Relationship
 	result  CheckBulkResultItem
@@ -29,6 +31,7 @@ func (p CheckBulkResultPair) Request() Relationship       { return p.request }
 func (p CheckBulkResultPair) Result() CheckBulkResultItem { return p.result }
 
 // CheckBulkResult contains the response from a bulk permission check.
+//domain:constructors NewCheckBulkResult
 type CheckBulkResult struct {
 	pairs            []CheckBulkResultPair
 	consistencyToken ConsistencyToken

@@ -8,6 +8,7 @@ import (
 )
 
 // Create Entities with unexported fields for encapsulation
+//domain:constructors NewReporterResource DeserializeReporterResource ReporterResource.Update ReporterResource.Delete
 type ReporterResource struct {
 	id ReporterResourceId
 	ReporterResourceKey
@@ -25,6 +26,7 @@ type ReporterResource struct {
 	updatedAt time.Time
 }
 
+//domain:constructors NewReporterResourceKey DeserializeReporterResourceKey ReporterResourceKey.UnmarshalJSON ResourceReportEvent.ReporterResourceKey
 type ReporterResourceKey struct {
 	localResourceID LocalResourceId
 	resourceType    ResourceType

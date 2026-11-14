@@ -1,6 +1,7 @@
 package model
 
 // HealthResult contains the outcome of a health check.
+//domain:constructors NewHealthResult
 type HealthResult struct {
 	status string
 	code   int

@@ -3,6 +3,7 @@ package model
 // RepresentationVersions encapsulates the version coordinates for fetching representations
 // from both the common and reporter streams. This value object groups related version
 // information that travels together through the fetch pipeline.
+//domain:constructors NewRepresentationVersions NewRepresentationVersionsFromTupleEvent
 type RepresentationVersions struct {
 	commonVersion      *Version
 	reporterVersion    *Version

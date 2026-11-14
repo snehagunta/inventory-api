@@ -1,6 +1,7 @@
 package model
 
 // LookupObjectsItem represents a single object from a lookup stream.
+//domain:constructors NewLookupObjectsItem
 type LookupObjectsItem struct {
 	object            ResourceReference
 	continuationToken ContinuationToken

@@ -214,7 +214,7 @@ lint-fix:
 lint-domain:
 	@echo "Running domain modeling linters"
 	@$(GO) -C tools/golangci-lint build -o /tmp/inventory-api-golangci-lint .
-	@/tmp/inventory-api-golangci-lint run --config .golangci.yaml --enable-only domainconstruct,domainzero,domainserialization ./internal/biz/model/...
+	@/tmp/inventory-api-golangci-lint run --config .golangci.yaml --enable-only domainconstruct,domainzero,domainserialization ./...
 
 .PHONY: pr-check
 # generate pr-check

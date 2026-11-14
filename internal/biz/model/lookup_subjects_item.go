@@ -1,6 +1,7 @@
 package model
 
 // LookupSubjectsItem represents a single subject from a lookup stream.
+//domain:constructors NewLookupSubjectsItem
 type LookupSubjectsItem struct {
 	subject           SubjectReference
 	continuationToken ContinuationToken

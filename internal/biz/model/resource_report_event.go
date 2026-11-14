@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
+//domain:constructors NewResourceReportEvent DeserializeResourceEvent ResourceReportEvent.SetTimestamps
 type ResourceReportEvent struct {
 	id                     ResourceId
 	resourceType           ResourceType

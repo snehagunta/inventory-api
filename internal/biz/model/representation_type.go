@@ -4,6 +4,7 @@ import "fmt"
 
 // RepresentationType identifies a kind of resource, optionally scoped to a reporter.
 // Matches Inventory v1beta2 RepresentationType proto semantics.
+//domain:constructors NewRepresentationType NewRepresentationTypeRequired
 type RepresentationType struct {
 	resourceType ResourceType  // required
 	reporterType *ReporterType // optional
